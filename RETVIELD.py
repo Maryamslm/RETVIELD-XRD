@@ -142,25 +142,30 @@ class Phase:
 
 def _build_phase_db() -> Dict[str, Phase]:
     db: Dict[str, Phase] = {}
-    db["gamma_Co"] = Phase(key="gamma_Co", name="γ-Co  (FCC)", formula="Co", pdf_card="PDF 15-0806",
+    
+    # PRIMARY PHASES
+    db["gamma_Co"] = Phase(key="gamma_Co", name="γ-Co (FCC)", formula="Co", pdf_card="PDF 15-0806",
         crystal_system="cubic", space_group="Fm-3m", sg_number=225, a=3.5447, b=3.5447, c=3.5447,
         atoms=[AtomSite("Co", "4a", 0, 0, 0, 1.0, 0.40)], wf_init=0.70, color="#38bdf8", group="Primary",
         description="FCC cobalt — primary austenitic matrix in SLM Co-Cr.")
-    db["epsilon_Co"] = Phase(key="epsilon_Co", name="ε-Co  (HCP)", formula="Co", pdf_card="PDF 05-0727",
+    db["epsilon_Co"] = Phase(key="epsilon_Co", name="ε-Co (HCP)", formula="Co", pdf_card="PDF 05-0727",
         crystal_system="hexagonal", space_group="P63/mmc", sg_number=194, a=2.5071, b=2.5071, c=4.0686,
         alpha=90, beta=90, gamma=120, atoms=[AtomSite("Co", "2c", 1/3, 2/3, 0.25, 1.0, 0.40)],
         wf_init=0.15, color="#fb923c", group="Primary", description="HCP cobalt — martensitic transform.")
-    db["sigma"] = Phase(key="sigma", name="σ-phase  (CoCr)", formula="CoCr", pdf_card="PDF 29-0490",
+    
+    # SECONDARY PHASES
+    db["sigma"] = Phase(key="sigma", name="σ-phase (CoCr)", formula="CoCr", pdf_card="PDF 29-0490",
         crystal_system="tetragonal", space_group="P42/mnm", sg_number=136, a=8.7960, b=8.7960, c=4.5750,
         atoms=[AtomSite("Co", "2a", 0, 0, 0, 0.5, 0.50), AtomSite("Cr", "2a", 0, 0, 0, 0.5, 0.50),
                AtomSite("Co", "4f", 0.398, 0.398, 0, 0.5, 0.50), AtomSite("Cr", "4f", 0.398, 0.398, 0, 0.5, 0.50),
                AtomSite("Co", "8i", 0.464, 0.132, 0, 0.5, 0.50), AtomSite("Cr", "8i", 0.464, 0.132, 0, 0.5, 0.50)],
-        wf_init=0.05, color="#4ade80", group="Secondary", description="Brittle tetragonal intermetallic.")
-    db["Cr_bcc"] = Phase(key="Cr_bcc", name="Cr  (BCC)", formula="Cr", pdf_card="PDF 06-0694",
+        wf_init=0.05, color="#4ade80", group="Secondary", 
+        description="Cr-rich intermetallic; appears after prolonged heat treatment or slow cooling; tetragonal structure.")
+    db["Cr_bcc"] = Phase(key="Cr_bcc", name="Cr (BCC)", formula="Cr", pdf_card="PDF 06-0694",
         crystal_system="cubic", space_group="Im-3m", sg_number=229, a=2.8839, b=2.8839, c=2.8839,
         atoms=[AtomSite("Cr", "2a", 0, 0, 0, 1.0, 0.40)], wf_init=0.04, color="#f87171", group="Secondary",
         description="BCC chromium — excess Cr or incomplete alloying.")
-    db["Mo_bcc"] = Phase(key="Mo_bcc", name="Mo  (BCC)", formula="Mo", pdf_card="PDF 42-1120",
+    db["Mo_bcc"] = Phase(key="Mo_bcc", name="Mo (BCC)", formula="Mo", pdf_card="PDF 42-1120",
         crystal_system="cubic", space_group="Im-3m", sg_number=229, a=3.1472, b=3.1472, c=3.1472,
         atoms=[AtomSite("Mo", "2a", 0, 0, 0, 1.0, 0.45)], wf_init=0.03, color="#c084fc", group="Secondary",
         description="BCC molybdenum — inter-dendritic segregation.")
@@ -169,12 +174,37 @@ def _build_phase_db() -> Dict[str, Phase]:
         alpha=90, beta=90, gamma=120, atoms=[AtomSite("Co", "6h", 1/6, 1/3, 0.25, 1.0, 0.50),
                AtomSite("Mo", "2c", 1/3, 2/3, 0.25, 1.0, 0.55)], wf_init=0.02, color="#a78bfa", group="Secondary",
         description="Hexagonal Co₃Mo — high-T annealing precipitate.")
-    db["Cr2O3"] = Phase(key="Cr2O3", name="Cr₂O₃  (Eskolaite)", formula="Cr2O3", pdf_card="PDF 38-1479",
+
+    # CARBIDES
+    db["M23C6"] = Phase(key="M23C6", name="M₂₃C₆ Carbide", formula="Cr23C6", pdf_card="PDF 36-0803",
+        crystal_system="cubic", space_group="Fm-3m", sg_number=225, a=10.61, b=10.61, c=10.61,
+        atoms=[AtomSite("Cr", "24e", 0.35, 0, 0, 1.0, 0.50), AtomSite("Cr", "32f", 0.35, 0.35, 0.35, 1.0, 0.50),
+               AtomSite("C", "32f", 0.30, 0.30, 0.30, 1.0, 0.50)], 
+        wf_init=0.05, color="#eab308", group="Carbides",
+        description="Cr₂₃C₆ type; very common in cast alloys with carbon; detected by characteristic low-angle peaks.")
+    db["M6C"] = Phase(key="M6C", name="M₆C Carbide", formula="(Co,Mo)6C", pdf_card="PDF 27-0408",
+        crystal_system="cubic", space_group="Fd-3m", sg_number=227, a=10.99, b=10.99, c=10.99,
+        atoms=[AtomSite("Mo", "16c", 0, 0, 0, 0.5, 0.50), AtomSite("Co", "16d", 0.5, 0.5, 0.5, 0.5, 0.50),
+               AtomSite("C", "48f", 0.375, 0.375, 0.375, 1.0, 0.50)], 
+        wf_init=0.05, color="#f97316", group="Carbides",
+        description="Mo/W-rich; found in Mo- or W-containing alloys.")
+
+    # LAVES PHASE
+    db["Laves"] = Phase(key="Laves", name="Laves Phase (Co₂Mo)", formula="Co2Mo", pdf_card="PDF 03-1225",
+        crystal_system="hexagonal", space_group="P63/mmc", sg_number=194, a=4.73, b=4.73, c=7.72,
+        alpha=90, beta=90, gamma=120,
+        atoms=[AtomSite("Co", "2a", 0, 0, 0, 1.0, 0.50), AtomSite("Mo", "2d", 1/3, 2/3, 0.75, 1.0, 0.50),
+               AtomSite("Co", "6h", 0.45, 0.90, 0.25, 1.0, 0.50)],
+        wf_init=0.05, color="#d946ef", group="Laves",
+        description="Hexagonal intermetallic precipitate; forms in Co-Mo/W systems; often brittle.")
+
+    # OXIDES
+    db["Cr2O3"] = Phase(key="Cr2O3", name="Cr₂O₃ (Eskolaite)", formula="Cr2O3", pdf_card="PDF 38-1479",
         crystal_system="trigonal", space_group="R-3m", sg_number=167, a=4.9580, b=4.9580, c=13.5942,
         alpha=90, beta=90, gamma=120, atoms=[AtomSite("Cr", "12c", 0, 0, 0.348, 1.0, 0.55),
                AtomSite("O", "18e", 0.306, 0, 0.25, 1.0, 0.60)], wf_init=0.02, color="#f472b6", group="Oxide",
         description="Chromium sesquioxide — passive oxide layer.")
-    db["CoCr2O4"] = Phase(key="CoCr2O4", name="CoCr₂O₄  (Spinel)", formula="CoCr2O4", pdf_card="PDF 22-1084",
+    db["CoCr2O4"] = Phase(key="CoCr2O4", name="CoCr₂O₄ (Spinel)", formula="CoCr2O4", pdf_card="PDF 22-1084",
         crystal_system="cubic", space_group="Fm-3m", sg_number=227, a=8.3216, b=8.3216, c=8.3216,
         atoms=[AtomSite("Co", "8a", 0.125, 0.125, 0.125, 1.0, 0.55), AtomSite("Cr", "16d", 0.5, 0.5, 0.5, 1.0, 0.55),
                AtomSite("O", "32e", 0.264, 0.264, 0.264, 1.0, 0.65)], wf_init=0.01, color="#22d3ee", group="Oxide",
@@ -184,6 +214,8 @@ def _build_phase_db() -> Dict[str, Phase]:
 PHASE_DB: Dict[str, Phase] = _build_phase_db()
 PRIMARY_KEYS   = ["gamma_Co", "epsilon_Co"]
 SECONDARY_KEYS = ["sigma", "Cr_bcc", "Mo_bcc", "Co3Mo"]
+CARBIDE_KEYS   = ["M23C6", "M6C"]
+LAVES_KEYS     = ["Laves"]
 OXIDE_KEYS     = ["Cr2O3", "CoCr2O4"]
 
 # ═══════════════════════════════════════════════════════════════════
@@ -197,16 +229,27 @@ def _allow_bcc(h, k, l): return (h+k+l) % 2 == 0
 def _allow_hcp(h, k, l): return not (l%2 != 0 and (h-k)%3 == 0)
 def _allow_sig(h, k, l): return (h+k+l) % 2 == 0
 def _allow_all(h, k, l): return True
-_ALLOW = {"Fm-3m": _allow_fcc, "Im-3m": _allow_bcc, "P63/mmc": _allow_hcp, "P42/mnm": _allow_sig, "R-3m": _allow_all}
+def _allow_fd3m(h, k, l):
+    # Fd-3m systematic absences: h,k,l unmixed. If all even, h+k+l=4n
+    if (h%2 != k%2) or (k%2 != l%2): return False
+    if (h%2 != 0): return True
+    return (h+k+l) % 4 == 0
+
+_ALLOW = {
+    "Fm-3m": _allow_fcc, "Im-3m": _allow_bcc, "P63/mmc": _allow_hcp, 
+    "P42/mnm": _allow_sig, "R-3m": _allow_all, "Fd-3m": _allow_fd3m
+}
 
 _CM: Dict[str, Tuple] = {
     "Co": ([2.7686,2.2087,1.6079,1.0000],[14.178,3.398,0.124,41.698],0.9768),
     "Cr": ([2.3070,2.2940,0.8167,0.0000],[10.798,1.173,11.002,132.79],1.1003),
     "Mo": ([3.7025,2.3517,1.5442,0.8534],[12.943,2.658,0.157,39.714],0.6670),
     "O":  ([0.4548,0.9177,0.4719,0.0000],[23.780,7.622,0.165,0.000], 0.0000),
+    "C":  ([2.31, 1.02, 1.59, 0.0], [20.84, 10.21, 0.57, 51.65], 0.20),
+    "W":  ([4.000, 3.000, 2.000, 1.000], [10.0,  3.0,  0.5, 50.0],  0.5000),
 }
 def _f0(el: str, stl: float) -> float:
-    if el not in _CM: return max({"Co":27,"Cr":24,"Mo":42,"O":8}.get(el, 20) - stl*4, 1.0)
+    if el not in _CM: return max({"Co":27,"Cr":24,"Mo":42,"O":8,"C":6}.get(el, 20) - stl*4, 1.0)
     a, b, c = _CM[el]; return c + sum(ai * np.exp(-bi * stl**2) for ai, bi in zip(a, b))
 
 def _calc_d(ph: Phase, h: int, k: int, l: int) -> float:
@@ -290,7 +333,7 @@ def _unpack(v: np.ndarray, n_bg: int, n_ph: int):
     z = float(v[0]); bg = v[1 : 1+n_bg]; pp = [v[1+n_bg+i*N_PP : 1+n_bg+(i+1)*N_PP] for i in range(n_ph)]
     return z, bg, pp
 
-_MASS = {"Co":58.933,"Cr":51.996,"Mo":95.950,"O":15.999}
+_MASS = {"Co":58.933,"Cr":51.996,"Mo":95.950,"O":15.999,"C":12.011,"W":183.84}
 def hill_howard(phases: List[Phase], pp: List[np.ndarray]) -> Dict[str, float]:
     totals = {}
     for ph, p in zip(phases, pp):
@@ -401,7 +444,7 @@ def parse_file_content(content: str, filename: str) -> Tuple[np.ndarray, np.ndar
         try:
             if len(parts) >= 2: data.append((float(parts[0]), float(parts[1])))
         except ValueError: continue
-    if not data:
+    if not 
         raise ValueError("Cannot parse — expected 2 columns: 2θ and Intensity.")
     arr = np.array(data); tt, I = arr[:, 0], arr[:, 1]
     if tt.max() < 5: tt = np.degrees(tt)
@@ -469,11 +512,24 @@ with st.sidebar:
     tt_lo, tt_hi = st.slider("", 10.0, 120.0, (15.0, 95.0), 0.5)
     st.markdown('<div class="sh">🧊 Phase Selection</div>', unsafe_allow_html=True)
     sel_keys: List[str] = []
-    for grp, keys, exp in [("Primary phases", PRIMARY_KEYS, True), ("Secondary phases", SECONDARY_KEYS, True), ("Oxide phases", OXIDE_KEYS, False)]:
+    
+    # Updated Phase Groups to include new Carbides and Laves
+    phase_groups = [
+        ("Primary phases", PRIMARY_KEYS, True),
+        ("Secondary phases", SECONDARY_KEYS, True),
+        ("Carbides", CARBIDE_KEYS, True),
+        ("Laves Phase", LAVES_KEYS, True),
+        ("Oxide phases", OXIDE_KEYS, False),
+    ]
+    
+    for grp, keys, exp in phase_groups:
         with st.expander(grp, expanded=exp):
             for k in keys:
-                ph = PHASE_DB[k]; default = k in (PRIMARY_KEYS + SECONDARY_KEYS[:2])
-                if st.checkbox(f"{ph.name} · {ph.formula}", value=default, key=f"ck_{k}", help=ph.description): sel_keys.append(k)
+                ph = PHASE_DB[k]
+                default = k in (PRIMARY_KEYS + SECONDARY_KEYS[:2])
+                if st.checkbox(f"{ph.name} · {ph.formula}", value=default, key=f"ck_{k}", help=ph.description):
+                    sel_keys.append(k)
+    
     if not sel_keys: st.warning("⚠️ Select at least one phase.")
     st.markdown('<div class="sh">🔧 Refinement Flags</div>', unsafe_allow_html=True)
     c1, c2 = st.columns(2)
@@ -697,7 +753,9 @@ with tab_about:
         "| γ-Co (FCC) | Co | Fm-3m | Primary |", "| ε-Co (HCP) | Co | P6₃/mmc | Primary |",
         "| σ-phase | CoCr | P4₂/mnm | Secondary |", "| Cr (BCC) | Cr | Im-3m | Secondary |",
         "| Mo (BCC) | Mo | Im-3m | Secondary |", "| Co₃Mo | Co₃Mo | P6₃/mmc | Secondary |",
-        "| Cr₂O₃ | Cr₂O₃ | R-3m | Oxide |", "| CoCr₂O₄ | CoCr₂O₄ | Fm-3m | Oxide |",
+        "| M23C6 | Cr23C6 | Fm-3m | Carbides |", "| M6C | (Co,Mo)6C | Fd-3m | Carbides |",
+        "| Laves | Co2Mo | P6₃/mmc | Laves |", "| Cr₂O₃ | Cr₂O₃ | R-3m | Oxide |",
+        "| CoCr₂O₄ | CoCr₂O₄ | Fm-3m | Oxide |",
         "", "### 📄 File Format Support", "| Extension | Format | Description |",
         "|-----------|--------|-------------|", "| `.ASC` `.DAT` `.TXT` | Two-column text | 2θ (°) · Intensity (counts) |",
         "| `.CSV` | Comma-separated | Header optional |", "| `.XRDML` | Panalytical XML | Native PANalytical/X'Pert format |",
