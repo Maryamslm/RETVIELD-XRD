@@ -423,7 +423,7 @@ def parse_file_content(content: str, filename: str) -> Tuple[np.ndarray, np.ndar
             if len(parts) >= 2: data.append((float(parts[0]), float(parts[1])))
         except ValueError: continue
     # ✅ FIXED SYNTAX ERROR: Added 'data' to the condition
-    if not 
+    if not data:
         raise ValueError("Cannot parse — expected 2 columns: 2θ and Intensity.")
     arr = np.array(data); tt, I = arr[:, 0], arr[:, 1]
     if tt.max() < 5: tt = np.degrees(tt)
@@ -747,31 +747,55 @@ with tab_report:
     else:
         r, refiner, elapsed, tt = st.session_state["results"], st.session_state["refiner"], st.session_state["elapsed"], st.session_state["tt"]
         md = []
-        md.append("# Rietveld Refinement Report"); md.append("## Co-Cr Dental Alloy · XRD Phase Analysis")
-        md.append(f"**Date:** {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')}"); md.append(f"**Radiation:** {wl_label} · λ = {wavelength:.5f} Å")
-        md.append(f"**Data points:** {len(tt)}"); md.append(f"**2θ range:** {tt.min():.2f}° – {tt.max():.2f}°"); md.append(f"**Computation time:** {elapsed:.2f} s")
-        md.append("---"); md.append("## 1 · Refinement Quality"); md.append("| Indicator | Value | Guidance |"); md.append("|-----------|-------|----------|")
-        md.append(f"| R_wp | **{r['Rwp']*100:.2f} %** | < 10 % acceptable; < 5 % excellent |"); md.append(f"| R_p | **{r['Rp']*100:.2f} %** | — |")
-        md.append(f"| χ² | **{r['chi2']:.4f}** | — |"); md.append(f"| GOF | **{r['GOF']:.4f}** | ≈ 1 ideal |")
-        md.append("---"); md.append("## 2 · Phase Weight Fractions (Hill-Howard)"); md.append("| Phase | Formula | S.G. | wt % |"); md.append("|-------|---------|------|------|")
+        md.append("# Rietveld Refinement Report")
+        md.append("## Co-Cr Dental Alloy · XRD Phase Analysis")
+        md.append(f"**Date:** {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')}")
+        md.append(f"**Radiation:** {wl_label} · λ = {wavelength:.5f} Å")
+        md.append(f"**Data points:** {len(tt)}")
+        md.append(f"**2θ range:** {tt.min():.2f}° – {tt.max():.2f}°")
+        md.append(f"**Computation time:** {elapsed:.2f} s")
+        md.append("---")
+        md.append("## 1 · Refinement Quality")
+        md.append("| Indicator | Value | Guidance |")
+        md.append("|-----------|-------|----------|")
+        md.append(f"| R_wp | **{r['Rwp']*100:.2f} %** | < 10 % acceptable; < 5 % excellent |")
+        md.append(f"| R_p | **{r['Rp']*100:.2f} %** | — |")
+        md.append(f"| χ² | **{r['chi2']:.4f}** | — |")
+        md.append(f"| GOF | **{r['GOF']:.4f}** | ≈ 1 ideal |")
+        md.append("---")
+        md.append("## 2 · Phase Weight Fractions (Hill-Howard)")
+        md.append("| Phase | Formula | S.G. | wt % |")
+        md.append("|-------|---------|------|------|")
         for k, wf in r["wf"].items():
-            ph = PHASE_DB[k]; md.append(f"| {ph.name} | {ph.formula} | {ph.space_group} | **{wf*100:.2f}** |")
-        md.append("---"); md.append("## 3 · Refined Lattice Parameters"); md.append("| Phase | a_init (Å) | a_ref (Å) | Δa | c_init (Å) | c_ref (Å) | Δc |"); md.append("|-------|-----------|-----------|-----|-----------|-----------|----|")
+            ph = PHASE_DB[k]
+            md.append(f"| {ph.name} | {ph.formula} | {ph.space_group} | **{wf*100:.2f}** |")
+        md.append("---")
+        md.append("## 3 · Refined Lattice Parameters")
+        md.append("| Phase | a_init (Å) | a_ref (Å) | Δa | c_init (Å) | c_ref (Å) | Δc |")
+        md.append("|-------|-----------|-----------|-----|-----------|-----------|----|")
         for k, lp in r["lat"].items():
             ph = PHASE_DB[k]
-            if ph.c != ph.a: md.append(f"| {ph.name} | {lp['a_init']:.4f} | {lp['a_ref']:.4f} | {lp['da']:+.4f} | {lp['c_init']:.4f} | {lp['c_ref']:.4f} | {lp['dc']:+.4f} |")
-            else: md.append(f"| {ph.name} | {lp['a_init']:.4f} | {lp['a_ref']:.4f} | {lp['da']:+.4f} | — | — | — |")
-        md.append("---"); md.append("## 4 · Profile Parameters"); md.append("| Phase | Scale | U | V | W | η |"); md.append("|-------|-------|---|---|---|---|")
+            if ph.c != ph.a:
+                md.append(f"| {ph.name} | {lp['a_init']:.4f} | {lp['a_ref']:.4f} | {lp['da']:+.4f} | {lp['c_init']:.4f} | {lp['c_ref']:.4f} | {lp['dc']:+.4f} |")
+            else:
+                md.append(f"| {ph.name} | {lp['a_init']:.4f} | {lp['a_ref']:.4f} | {lp['da']:+.4f} | — | — | — |")
+        md.append("---")
+        md.append("## 4 · Profile Parameters")
+        md.append("| Phase | Scale | U | V | W | η |")
+        md.append("|-------|-------|---|---|---|---|")
         for k, lp in r["lat"].items():
-            ph = PHASE_DB[k]; md.append(f"| {ph.name} | {lp['scale']:.3e} | {lp['U']:.5f} | {lp['V']:.5f} | {lp['W']:.5f} | {lp['eta']:.3f} |")
-        md.append("---"); md.append("## 5 · Methodology")
+            ph = PHASE_DB[k]
+            md.append(f"| {ph.name} | {lp['scale']:.3e} | {lp['U']:.5f} | {lp['V']:.5f} | {lp['W']:.5f} | {lp['eta']:.3f} |")
+        md.append("---")
+        md.append("## 5 · Methodology")
         md.append("- **Profile:** Thompson-Cox-Hastings pseudo-Voigt · Caglioti FWHM (U, V, W, η)")
         md.append(f"- **Background:** Chebyshev polynomial ({n_bg} terms)")
         md.append("- **LP correction:** Graphite monochromator (2θ_mono = 26.6°)")
         md.append("- **Structure factors:** Cromer-Mann + isotropic Debye-Waller")
         md.append("- **Weight fractions:** Hill-Howard formula")
         md.append(f"- **Optimiser:** scipy.optimize.least_squares (TRF / Levenberg-Marquardt · {max_it} iter.)")
-        md.append("---"); md.append("## 6 · References")
+        md.append("---")
+        md.append("## 6 · References")
         md.append("1. Rietveld (1969) *J. Appl. Cryst.* **2**, 65–71")
         md.append("2. Hill & Howard (1987) *J. Appl. Cryst.* **20**, 467–474")
         md.append("3. Thompson et al. (1987) *J. Appl. Cryst.* **20**, 79–83")
