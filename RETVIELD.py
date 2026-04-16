@@ -1,7 +1,7 @@
 """
 ╔══════════════════════════════════════════════════════════════════╗
 ║   Co-Cr Dental Alloy · Full Rietveld XRD Refinement             ║
-║   Single-file Streamlit Application with Publication Plotting   ║
+║   Single-file Streamlit Application with Standard Rietveld Plot ║
 ║   Supports .ASC/.XRDML · Smoothing · Multiple Peak Profiles     ║
 ║                                                                  ║
 ║   Usage:  streamlit run RETVIELD.py                              ║
@@ -31,7 +31,7 @@ try:
     MATPLOTLIB_OK = True
 except ImportError:
     MATPLOTLIB_OK = False
-    # Warning will be shown in the UI later if needed
+    st.warning("Matplotlib not found. Publication plots will be disabled. Please add 'matplotlib' to requirements.txt.")
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
@@ -60,11 +60,17 @@ AVAILABLE_FILES = {
 }
 
 # ═══════════════════════════════════════════════════════════════════
-# PUBLICATION PLOT GENERATOR
+# PUBLICATION PLOT GENERATOR (STANDARD RIETVELD LAYOUT)
 # ═══════════════════════════════════════════════════════════════════
 def create_publication_figure(tt, I_obs, I_calc, I_bg, I_diff, phase_ticks, 
                               Rwp, Rp, chi2, GOF, sample_name, wavelength, smooth=True):
-    """Generate publication-quality Rietveld plot using Matplotlib"""
+    """
+    Generate a classic Rietveld refinement plot matching standard literature.
+    - Red circles: Observed Data
+    - Black line: Calculated Fit
+    - Blue line: Difference (Bottom)
+    - Green ticks: Bragg Positions (Middle)
+    """
     if smooth:
         try: I_obs_smooth = savgol_filter(I_obs, window_length=7, polyorder=3)
         except: I_obs_smooth = I_obs
@@ -78,41 +84,73 @@ def create_publication_figure(tt, I_obs, I_calc, I_bg, I_diff, phase_ticks,
         'xtick.top': True, 'ytick.right': True, 'figure.dpi': 300
     })
 
-    fig, (ax_main, ax_diff) = plt.subplots(2, 1, figsize=(8, 6), gridspec_kw={'height_ratios': [3, 1], 'hspace': 0.08})
+    # Create 3 subplots: Main Data (Top), Ticks (Middle), Difference (Bottom)
+    fig = plt.figure(figsize=(8, 6))
+    gs = fig.add_gridspec(3, 1, height_ratios=[4, 1, 1.5], hspace=0.08)
     
-    # Main pattern
-    ax_main.plot(tt, I_calc, color='#D32F2F', linewidth=1.5, label='Calculated')
-    ax_main.plot(tt, I_obs_smooth, 'ko', markersize=2.5, alpha=0.7, label='Observed', rasterized=True)
-    ax_main.plot(tt, I_bg, color='#999999', linewidth=0.8, linestyle='--', label='Background')
+    ax_main = fig.add_subplot(gs[0])
+    ax_ticks = fig.add_subplot(gs[1], sharex=ax_main)
+    ax_diff = fig.add_subplot(gs[2], sharex=ax_main)
     
-    # Bragg ticks
-    y_min = np.min(I_bg) * 0.8
-    colors = ['#0044AA', '#008844', '#AA4400', '#880088', '#4444AA', '#AA8800']
-    for i, (name, ticks) in enumerate(phase_ticks.items()):
-        if not ticks: continue
-        row_y = y_min - (i + 1) * (abs(y_min) * 0.08)
-        color = colors[i % len(colors)]
-        ax_main.vlines(ticks, row_y - abs(y_min)*0.04, row_y + abs(y_min)*0.04, color=color, linewidth=1.8)
-        ax_main.annotate(name, xy=(ticks[0]-0.5, row_y), color=color, fontsize=8.5, fontweight='bold', ha='right', va='center', fontfamily='serif')
+    # ─── 1. TOP PANEL: Observed vs Calculated ───
+    # Black line = Calculated (Model)
+    ax_main.plot(tt, I_calc, color='black', linewidth=1.5, label='Calculated', zorder=2)
+    # Red circles = Observed (Experimental)
+    ax_main.plot(tt, I_obs_smooth, 'ro', markersize=3, alpha=0.6, label='Observed', rasterized=True, zorder=3)
+    # Optional: Background line (gray dashed)
+    ax_main.plot(tt, I_bg, color='gray', linewidth=0.8, linestyle='--', alpha=0.5, label='Background')
     
-    ax_main.set_ylim(y_min - len(phase_ticks)*abs(y_min)*0.1, np.max(I_obs)*1.1)
+    # Set limits and labels
     ax_main.set_ylabel('Intensity (a.u.)', fontsize=11, fontweight='bold')
     ax_main.tick_params(axis='both', labelsize=10, width=1.2, length=4)
-    ax_main.legend(loc='upper left', frameon=True, edgecolor='black', fontsize=9)
+    ax_main.legend(loc='upper right', frameon=False, fontsize=9)
+    ax_main.set_xlim(np.min(tt), np.max(tt))
     
-    # Difference
-    ax_diff.plot(tt, I_diff, color='#388E3C', linewidth=1.2)
-    ax_diff.axhline(0, color='black', linewidth=0.8)
-    ax_diff.fill_between(tt, 0, I_diff, color='#66BB6A', alpha=0.2)
+    # ─── 2. MIDDLE PANEL: Bragg Ticks ───
+    ax_ticks.set_ylim(-0.5, 1.5)
+    ax_ticks.set_yticks([])
+    ax_ticks.tick_params(left=False, bottom=False, labelbottom=False)
+    # Hide axes spines for cleaner look
+    ax_ticks.spines['top'].set_visible(False)
+    ax_ticks.spines['right'].set_visible(False)
+    ax_ticks.spines['left'].set_visible(False)
+    
+    # Plot Green Ticks for each phase
+    # Standard is often green or distinct colors. Prompt asked for "Green ticks".
+    # I will use green for all, or vary if needed.
+    colors = ['#00AA00', '#008800', '#006600', '#00DD00', '#005500'] 
+    
+    for i, (name, tick_pos) in enumerate(phase_ticks.items()):
+        if not tick_pos: continue
+        color = colors[i % len(colors)]
+        # Plot vertical lines (ticks)
+        ax_ticks.vlines(tick_pos, 0, 1, colors=color, linewidth=1.5, label=name)
+        # Add small text label for phase
+        if tick_pos:
+            ax_ticks.annotate(name, xy=(tick_pos[0], 0.5), ha='left', va='center', 
+                              fontsize=8, color=color, fontweight='bold', fontfamily='serif')
+    
+    ax_ticks.set_ylabel('Positions', fontsize=9, rotation=0, labelpad=30, ha='right')
+
+    # ─── 3. BOTTOM PANEL: Difference Curve ───
+    # Blue line = Difference
+    ax_diff.plot(tt, I_diff, color='blue', linewidth=1.2)
+    ax_diff.axhline(0, color='black', linewidth=0.8, linestyle='-')
+    # Optional: Fill between
+    ax_diff.fill_between(tt, 0, I_diff, color='blue', alpha=0.1)
+    
     ax_diff.set_xlabel('2θ (degrees)', fontsize=11, fontweight='bold')
     ax_diff.set_ylabel('ΔI', fontsize=10)
     ax_diff.tick_params(axis='both', labelsize=10, width=1.2, length=4)
     ax_diff.set_xlim(ax_main.get_xlim())
     
-    # Info box
+    # ─── INFO TEXT BOX ───
     info = f"Sample: {sample_name}\nRadiation: {wavelength}\n$R_{{wp}}$: {Rwp:.2f}%\n$R_{{p}}$: {Rp:.2f}%\nχ²: {chi2:.3f}\nGOF: {GOF:.3f}"
-    props = dict(boxstyle='round,pad=0.4', facecolor='#F8F9FA', edgecolor='#333333', alpha=0.95, linewidth=1)
-    ax_main.text(0.98, 0.98, info, transform=ax_main.transAxes, fontsize=9, verticalalignment='top', horizontalalignment='right', fontfamily='serif', bbox=props, zorder=10)
+    props = dict(boxstyle='round,pad=0.4', facecolor='#FFFFFF', edgecolor='#333333', alpha=0.9, linewidth=1)
+    # Place in top left of main plot
+    ax_main.text(0.02, 0.98, info, transform=ax_main.transAxes, fontsize=9, 
+                 verticalalignment='top', horizontalalignment='left',
+                 fontfamily='serif', bbox=props, zorder=10)
     
     plt.tight_layout()
     
@@ -486,21 +524,28 @@ with tabs[0]:
         st.markdown(f"""<div class="mstrip"><div class="mc"><div class="lbl">R_wp</div><div class="val" style="color:{qc}">{rwp*100:.2f}</div><div class="sub">%</div></div><div class="mc"><div class="lbl">R_p</div><div class="val">{rp*100:.2f}</div><div class="sub">%</div></div><div class="mc"><div class="lbl">GOF</div><div class="val">{gof:.3f}</div></div><div class="mc"><div class="lbl">χ²</div><div class="val">{chi2:.4f}</div></div><div class="mc"><div class="lbl">Pts</div><div class="val">{len(tt)}</div></div><div class="mc"><div class="lbl">Time</div><div class="val">{elapsed:.1f}s</div></div></div>""", unsafe_allow_html=True)
         
         fig=make_subplots(rows=2,cols=1,row_heights=[0.78,0.22],shared_xaxes=True,vertical_spacing=0.02)
-        fig.add_trace(go.Scatter(x=tt,y=Iobs,mode="lines",name="Observed",line=dict(color="#94a3b8",width=1.3)),1,1)
-        fig.add_trace(go.Scatter(x=tt,y=r["Ibg"],mode="lines",name="BG",line=dict(color="#334155",width=1,dash="dot"),fill="tozeroy"),1,1)
-        for k,Iph in r["contribs"].items(): fig.add_trace(go.Scatter(x=tt,y=Iph+r["Ibg"],mode="lines",name=f"{PHASE_DB[k].name} ({r['wf'][k]*100:.1f}%)",line=dict(color=PHASE_DB[k].color,width=1.6,dash="dash"),opacity=0.8),1,1)
-        fig.add_trace(go.Scatter(x=tt,y=r["Icalc"],mode="lines",name="Calc",line=dict(color="#fbbf24",width=2.2)),1,1)
-        fig.add_trace(go.Scatter(x=tt,y=r["diff"],mode="lines",name="Δ",line=dict(color="#818cf8",width=1),fill="tozeroy"),2,1)
-        fig.add_hline(y=0,line=dict(color="#334155",dash="dash"),row=2,col=1)
+        # Update colors to match request: Red Obs, Black Calc
+        fig.add_trace(go.Scatter(x=tt,y=Iobs,mode='markers',marker=dict(color='red',size=3),name='Observed',opacity=0.7),1,1)
+        fig.add_trace(go.Scatter(x=tt,y=r["Ibg"],mode="lines",name="BG",line=dict(color="#999999",width=0.8,dash="dot")),1,1)
+        fig.add_trace(go.Scatter(x=tt,y=r["Icalc"],mode="lines",name="Calculated",line=dict(color="black",width=1.5)),1,1)
+        
+        # Phase Ticks (Green)
+        for k,Iph in r["contribs"].items(): 
+            fig.add_trace(go.Scatter(x=tt,y=Iph+r["Ibg"],mode="lines",name=f"{PHASE_DB[k].name} ({r['wf'][k]*100:.1f}%)",line=dict(color=PHASE_DB[k].color,width=1.2,dash="dash"),opacity=0.8),1,1)
+            
+        fig.add_trace(go.Scatter(x=tt,y=r["diff"],mode="lines",name="Difference",line=dict(color="blue",width=1.0),fill="tozeroy"),2,1)
+        fig.add_hline(y=0,line=dict(color="black",dash="dash"),row=2,col=1)
         
         if show_labels:
             y_max,y_min=float(Iobs.max()),float(Iobs.min()); rng=y_max-y_min if y_max>y_min else 1000; ly=y_max+(rng*label_offset/100)
             for i,ph in enumerate(refiner.phases):
                 a_r,c_r=float(pp_vec[i][1]),float(pp_vec[i][2]); pks=generate_reflections(_make_refined_phase(ph,a_r,c_r),wl=wavelength,tt_min=float(tt.min()),tt_max=float(tt.max()))
-                yt=y_min-(rng*0.08); fig.add_trace(go.Scatter(x=[p["tt"]+z_shift for p in pks],y=[yt]*len(pks),mode="markers",marker=dict(symbol="triangle-up",size=12,color=ph.color),name=f"{ph.name} ticks",showlegend=True),1,1)
+                yt=y_min-(rng*0.08)
+                # Green ticks
+                fig.add_trace(go.Scatter(x=[p["tt"]+z_shift for p in pks],y=[yt]*len(pks),mode="markers",marker=dict(symbol="triangle-up",size=10,color="green"),name=f"{ph.name} ticks",showlegend=True),1,1)
                 lc=ph.color if label_color=="phase" else label_color
                 for pk in pks: fig.add_annotation(x=pk["tt"]+z_shift, y=ly, text=f"({pk['h']} {pk['k']} {pk['l']})", showarrow=False, font=dict(size=label_font,color=lc,family="IBM Plex Mono"), xanchor="center", yanchor="bottom", bgcolor="rgba(0,0,0,0.4)" if bg_theme=="Dark Mode" else "rgba(255,255,255,0.8)")
-        fig.update_layout(template=plot_theme, height=650, margin=dict(l=60,r=20,t=20,b=50), legend=dict(font=dict(size=10)), xaxis=dict(title="2θ (°)"), yaxis=dict(title="Intensity"), xaxis2=dict(title="2θ (°)"), yaxis2=dict(title="Δ"))
+        fig.update_layout(template=plot_theme, height=650, margin=dict(l=60,r=20,t=20,b=50), legend=dict(font=dict(size=10)), xaxis=dict(title="2θ (°)"), yaxis=dict(title="Intensity"), xaxis2=dict(title="2θ (°)"), yaxis2=dict(title="ΔI"))
         st.plotly_chart(fig, use_container_width=True)
         
         # 🖨️ PUBLICATION PLOT SECTION
@@ -512,7 +557,7 @@ with tabs[0]:
             
             if st.button("🎨 Generate & Download"):
                 if not MATPLOTLIB_OK:
-                    st.error("This feature requires 'matplotlib'. Please add it to your requirements.txt and deploy again.")
+                    st.error("This feature requires 'matplotlib'. Please add it to your requirements.txt.")
                 else:
                     plt.rcParams['figure.figsize']=(fig_w, fig_h)
                     phase_ticks={}
