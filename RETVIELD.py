@@ -33,7 +33,7 @@ try:
     MATPLOTLIB_OK = True
 except ImportError:
     MATPLOTLIB_OK = False
-    st.warning("Matplotlib not found. Publication plots will be disabled.")
+    st.warning("Matplotlib not found. Publication plots will be disabled. Please add 'matplotlib' to requirements.txt.")
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
@@ -67,7 +67,11 @@ AVAILABLE_FILES = {
 def create_publication_figure(tt, I_obs, I_calc, I_bg, I_diff, phase_ticks, 
                               Rwp, Rp, chi2, GOF, sample_name, wavelength, smooth=True):
     """
-    Create publication-quality XRD/Rietveld refinement plot matching GSAS-II/TOPAS standards.
+    Create publication-quality XRD/Rietveld refinement plot matching GSAS-II/FullProf standards.
+    - Red open circles: Experimental data
+    - Black solid line: Calculated fit
+    - Blue line: Difference curve (offset below)
+    - Green vertical bars: Bragg reflection positions
     """
     if smooth:
         try: I_obs_smooth = savgol_filter(I_obs, window_length=7, polyorder=3)
@@ -77,79 +81,82 @@ def create_publication_figure(tt, I_obs, I_calc, I_bg, I_diff, phase_ticks,
 
     # Publication style settings
     plt.rcParams.update({
-        'font.family': 'serif', 'font.serif': ['Times New Roman', 'DejaVu Serif'],
-        'font.size': 10, 'axes.linewidth': 0.8, 'axes.grid': True, 'grid.alpha': 0.3,
-        'grid.linestyle': '--', 'grid.linewidth': 0.5,
+        'font.family': 'serif', 'font.serif': ['Times New Roman', 'DejaVu Serif', 'Computer Modern'],
+        'font.size': 10, 'axes.linewidth': 1.0, 'axes.grid': False,
         'xtick.direction': 'in', 'ytick.direction': 'in',
         'xtick.top': True, 'ytick.right': True,
         'xtick.labelsize': 9, 'ytick.labelsize': 9,
-        'legend.fontsize': 9, 'figure.dpi': 300, 'savefig.dpi': 300
+        'legend.fontsize': 9, 'figure.dpi': 300, 'savefig.dpi': 300,
+        'xtick.major.width': 1.0, 'ytick.major.width': 1.0,
+        'xtick.minor.width': 0.8, 'ytick.minor.width': 0.8,
+        'xtick.major.size': 4, 'ytick.major.size': 4,
+        'xtick.minor.size': 2, 'ytick.minor.size': 2,
     })
 
-    # Colorblind-friendly palette
-    COLORS = {'obs': '#1f77b4', 'calc': '#d62728', 'bg': '#999999', 'diff': '#2ca02c'}
-    PHASE_COLORS = ['#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
+    # Color scheme
+    COLORS = {'obs_edge': '#FF0000', 'calc': '#000000', 'bg': '#999999', 'diff': '#0000FF', 'ticks': '#00AA00'}
+    PHASE_COLORS = ['#00AA00', '#0088AA', '#AA00AA', '#AA8800', '#00AAAA', '#AA0088']
 
-    # Layout: 3 panels (Main, Ticks, Difference)
-    fig = plt.figure(figsize=(8.5, 6.5))
-    gs = gridspec.GridSpec(3, 1, height_ratios=[4, 0.6, 1.5], hspace=0.08)
+    # Calculate offset for difference plot
+    y_max = np.max(I_calc)
+    y_min = np.min(I_calc)
+    offset = (y_max - y_min) * 0.15
+    diff_offset = y_min - offset
+
+    # Create figure
+    fig, ax = plt.subplots(figsize=(8.5, 6.5))
     
-    ax_main = fig.add_subplot(gs[0])
-    ax_ticks = fig.add_subplot(gs[1], sharex=ax_main)
-    ax_diff = fig.add_subplot(gs[2], sharex=ax_main)
+    # ─── 1. PLOT DATA ───
+    # Experimental: Red OPEN circles (markerfacecolor='none')
+    ax.plot(tt, I_obs_smooth, 'o', markersize=3, markerfacecolor='none', 
+            markeredgecolor=COLORS['obs_edge'], markeredgewidth=0.8, 
+            label='Experimental data', zorder=3, rasterized=True)
     
-    # ─── 1. TOP PANEL: Observed vs Calculated ───
-    # Calculated: Red line
-    ax_main.plot(tt, I_calc, color=COLORS['calc'], linewidth=1.5, label='Calculated', zorder=3)
-    # Observed: Blue markers with transparency
-    ax_main.plot(tt, I_obs_smooth, 'o', color=COLORS['obs'], markersize=2, alpha=0.5, label='Observed', zorder=2, rasterized=True)
-    # Background
-    ax_main.plot(tt, I_bg, color=COLORS['bg'], linewidth=0.8, linestyle='--', alpha=0.6, label='Background')
+    # Calculated: Black solid line
+    ax.plot(tt, I_calc, '-', color=COLORS['calc'], linewidth=1.2, 
+            label='Rietveld refinement', zorder=4)
     
-    ax_main.set_ylabel('Intensity (counts)', fontweight='bold', fontsize=11)
-    ax_main.tick_params(axis='both', which='major', length=4, width=0.8)
-    ax_main.tick_params(axis='both', which='minor', length=2, width=0.5)
-    ax_main.xaxis.set_minor_locator(AutoMinorLocator(2))
-    ax_main.yaxis.set_minor_locator(AutoMinorLocator(2))
-    ax_main.set_xlim(tt.min(), tt.max())
-    ax_main.legend(loc='upper right', frameon=True, fancybox=False, edgecolor='black', framealpha=0.9)
+    # Background (optional, subtle)
+    ax.plot(tt, I_bg, '-', color=COLORS['bg'], linewidth=0.6, alpha=0.5, label='Background')
     
-    # ─── 2. MIDDLE PANEL: Bragg Ticks (hkl) ───
-    ax_ticks.set_ylim(-0.5, 1.5)
-    ax_ticks.set_yticks([])
-    ax_ticks.spines['top'].set_visible(False)
-    ax_ticks.spines['right'].set_visible(False)
-    ax_ticks.spines['left'].set_visible(False)
-    ax_ticks.spines['bottom'].set_visible(False)
-    ax_ticks.tick_params(left=False, bottom=False, labelbottom=False)
+    # Difference curve (offset below with zero line)
+    ax.plot(tt, I_diff + diff_offset, '-', color=COLORS['diff'], linewidth=1.0, 
+            label='Difference', zorder=2)
+    ax.axhline(y=diff_offset, color='gray', linestyle='--', linewidth=0.5, alpha=0.7, zorder=1)
+    
+    # ─── 2. BRAGG TICKS (Green vertical bars) ───
+    tick_height = offset * 0.25
+    tick_y_base = diff_offset - tick_height * 1.8
     
     for i, (name, tick_pos) in enumerate(phase_ticks.items()):
         if not tick_pos: continue
         color = PHASE_COLORS[i % len(PHASE_COLORS)]
-        ax_ticks.vlines(tick_pos, 0, 1, colors=color, linewidth=1.8)
-        if tick_pos:
-            ax_ticks.annotate(name, xy=(tick_pos[0]+0.3, 0.5), ha='left', va='center', 
-                              fontsize=8, color=color, fontweight='bold', fontfamily='serif')
-    ax_ticks.set_ylabel('Positions', fontsize=9, rotation=0, labelpad=25, ha='right')
-
-    # ─── 3. BOTTOM PANEL: Difference Curve ───
-    ax_diff.fill_between(tt, I_diff, alpha=0.2, color=COLORS['diff'], label='Difference')
-    ax_diff.plot(tt, I_diff, color=COLORS['diff'], linewidth=1.0)
-    ax_diff.axhline(0, color='black', linewidth=0.6, linestyle='-')
+        for pos in tick_pos:
+            ax.plot([pos, pos], [tick_y_base, tick_y_base + tick_height], 
+                   '-', color=color, linewidth=1.5, 
+                   label=name if pos == tick_pos[0] else "", zorder=5)
     
-    ax_diff.set_xlabel(r'2$\theta$ (°)', fontweight='bold', fontsize=11)
-    ax_diff.set_ylabel('ΔI', fontweight='bold', fontsize=10)
-    ax_diff.tick_params(axis='both', which='major', length=4, width=0.8)
-    ax_diff.xaxis.set_minor_locator(AutoMinorLocator(2))
-    ax_diff.yaxis.set_minor_locator(AutoMinorLocator(2))
-    ax_diff.set_xlim(ax_main.get_xlim())
-    ax_diff.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
+    # ─── 3. LABELS & FORMATTING ───
+    ax.set_xlabel(r'$2\theta$ (°)', fontweight='bold', fontsize=11)
+    ax.set_ylabel('Intensity (arb. units)', fontweight='bold', fontsize=11)
     
-    # ─── INFO TEXT BOX ───
+    # Set y-axis limits to show difference curve properly
+    ax.set_ylim([tick_y_base - tick_height * 0.5, y_max * 1.08])
+    ax.set_xlim(tt.min(), tt.max())
+    
+    # Add minor ticks
+    ax.xaxis.set_minor_locator(AutoMinorLocator(2))
+    ax.yaxis.set_minor_locator(AutoMinorLocator(2))
+    
+    # Legend (clean, upper right)
+    ax.legend(loc='upper right', frameon=True, fancybox=False, 
+              edgecolor='black', framealpha=0.95, fontsize=9)
+    
+    # ─── 4. INFO TEXT BOX ───
     info = f"$R_{{wp}}$: {Rwp:.2f}%\n$R_{{p}}$: {Rp:.2f}%\nχ²: {chi2:.3f}\nGOF: {GOF:.3f}"
-    props = dict(boxstyle='round,pad=0.3', facecolor='#FFFFFF', edgecolor='#000000', alpha=0.85, linewidth=0.8)
-    ax_main.text(0.02, 0.98, info, transform=ax_main.transAxes, fontsize=9, 
-                 verticalalignment='top', horizontalalignment='left', fontfamily='serif', bbox=props, zorder=10)
+    props = dict(boxstyle='round,pad=0.3', facecolor='#FFFFFF', edgecolor='#000000', alpha=0.9, linewidth=0.8)
+    ax.text(0.02, 0.98, info, transform=ax.transAxes, fontsize=9, 
+            verticalalignment='top', horizontalalignment='left', fontfamily='serif', bbox=props, zorder=10)
     
     plt.tight_layout()
     
@@ -527,45 +534,78 @@ with tabs[0]:
         rwp,rp,gof,chi2=r["Rwp"],r["Rp"],r["GOF"],r["chi2"]; qc=q_color(rwp)
         st.markdown(f"""<div class="mstrip"><div class="mc"><div class="lbl">R_wp</div><div class="val" style="color:{qc}">{rwp*100:.2f}</div><div class="sub">%</div></div><div class="mc"><div class="lbl">R_p</div><div class="val">{rp*100:.2f}</div><div class="sub">%</div></div><div class="mc"><div class="lbl">GOF</div><div class="val">{gof:.3f}</div></div><div class="mc"><div class="lbl">χ²</div><div class="val">{chi2:.4f}</div></div><div class="mc"><div class="lbl">Pts</div><div class="val">{len(tt)}</div></div><div class="mc"><div class="lbl">Time</div><div class="val">{elapsed:.1f}s</div></div></div>""", unsafe_allow_html=True)
         
-        fig=make_subplots(rows=2,cols=1,row_heights=[0.75,0.25],shared_xaxes=True,vertical_spacing=0.08,
-                          subplot_titles=('','Difference'), vertical_spacing=0.08)
-        # Observed: Gray/Blue markers with transparency (publication standard)
-        fig.add_trace(go.Scatter(x=tt,y=Iobs,mode='markers',marker=dict(color='#1f77b4',size=2,opacity=0.6),name='Observed',legendgroup='main'),row=1,col=1)
-        # Calculated: Red line
-        fig.add_trace(go.Scatter(x=tt,y=r["Icalc"],mode='lines',line=dict(color='#d62728',width=1.5),name='Calculated',legendgroup='main'),row=1,col=1)
-        # Background
-        fig.add_trace(go.Scatter(x=tt,y=r["Ibg"],mode='lines',line=dict(color='#999999',width=0.8,dash='dot'),name='BG',showlegend=False),row=1,col=1)
+        # ─── INTERACTIVE PLOT (Publication Style) ───
+        fig=make_subplots(rows=2,cols=1,row_heights=[0.75,0.25],shared_xaxes=True,vertical_spacing=0.12,
+                          subplot_titles=('','Difference'))
         
-        # Difference: Green fill
-        fig.add_trace(go.Scatter(x=tt,y=r["diff"],mode='lines',line=dict(color='#2ca02c',width=1),fill='tozeroy',fillcolor='rgba(44,160,44,0.2)',name='Difference',showlegend=False),row=2,col=1)
-        fig.add_hline(y=0,line=dict(color="black",dash="dash",width=0.8),row=2,col=1)
+        # Observed: Red OPEN circles (markerfacecolor='none' equivalent in Plotly)
+        fig.add_trace(go.Scatter(x=tt,y=Iobs,mode='markers',
+                                marker=dict(color='rgba(255,0,0,0.8)',size=4,line=dict(width=0.8,color='red')),
+                                name='Experimental data',legendgroup='main',showlegend=True),row=1,col=1)
         
-        # hkl Ticks (Green/Purple) with labels
-        if show_labels:
-            y_min=float(Iobs.min())
-            y_tick_base = y_min - (y_min*0.05)
+        # Calculated: Black solid line
+        fig.add_trace(go.Scatter(x=tt,y=r["Icalc"],mode='lines',
+                                line=dict(color='black',width=1.5),
+                                name='Rietveld refinement',legendgroup='main',showlegend=True),row=1,col=1)
+        
+        # Background (subtle)
+        fig.add_trace(go.Scatter(x=tt,y=r["Ibg"],mode='lines',
+                                line=dict(color='#999999',width=0.6,dash='dot'),
+                                name='Background',showlegend=True),row=1,col=1)
+        
+        # Difference: Blue line offset below
+        y_min_calc = np.min(r["Icalc"])
+        y_max_calc = np.max(r["Icalc"])
+        offset = (y_max_calc - y_min_calc) * 0.15
+        diff_offset = y_min_calc - offset
+        
+        fig.add_trace(go.Scatter(x=tt,y=r["diff"]+diff_offset,mode='lines',
+                                line=dict(color='blue',width=1.0),
+                                name='Difference',showlegend=True),row=2,col=1)
+        fig.add_hline(y=diff_offset,line=dict(color="gray",dash="dash",width=0.5),row=2,col=1)
+        
+        # Bragg Ticks: Green vertical bars
+        tick_height = offset * 0.25
+        tick_y_base = diff_offset - tick_height * 1.8
+        PHASE_COLORS = ['#00AA00', '#0088AA', '#AA00AA', '#AA8800', '#00AAAA', '#AA0088']
+        
+        for i,ph in enumerate(refiner.phases):
+            a_r,c_r=float(pp_vec[i][1]),float(pp_vec[i][2])
+            pks=generate_reflections(_make_refined_phase(ph,a_r,c_r),wl=wavelength,tt_min=float(tt.min()),tt_max=float(tt.max()))
+            color = PHASE_COLORS[i % len(PHASE_COLORS)]
             
-            for i,ph in enumerate(refiner.phases):
-                a_r,c_r=float(pp_vec[i][1]),float(pp_vec[i][2]); pks=generate_reflections(_make_refined_phase(ph,a_r,c_r),wl=wavelength,tt_min=float(tt.min()),tt_max=float(tt.max()))
-                tick_color = "#9467bd" if i==0 else "#8c564b" if i==1 else "#17becf"
-                fig.add_trace(go.Scatter(x=[p["tt"]+z_shift for p in pks], y=[y_tick_base]*len(pks), mode="markers", 
-                                        marker=dict(symbol="triangle-up",size=10,color=tick_color),
-                                        name=f"{ph.name} ticks", showlegend=True), row=1, col=1)
+            # Add vertical tick lines
+            for pk in pks:
+                fig.add_trace(go.Scatter(x=[pk["tt"]+z_shift, pk["tt"]+z_shift], 
+                                        y=[tick_y_base, tick_y_base+tick_height],
+                                        mode='lines',line=dict(color=color,width=1.5),
+                                        name=f"{ph.name} Bragg" if pk==pks[0] else "",
+                                        showlegend=(pk==pks[0]),legendgroup='ticks'),row=1,col=1)
+            
+            # Optional: Add (hkl) labels above peaks
+            if show_labels:
+                label_y = y_max_calc + (y_max_calc-y_min_calc)*0.05
                 lc=ph.color if label_color=="phase" else label_color
-                for pk in pks: fig.add_annotation(x=pk["tt"]+z_shift, y=y_tick_base+500, text=f"({pk['h']}{pk['k']}{pk['l']})", 
-                                                showarrow=False, font=dict(size=8,color=lc,family="serif"), xanchor="center", yanchor="bottom")
-                
-        # Layout styling
+                for pk in pks:
+                    fig.add_annotation(x=pk["tt"]+z_shift, y=label_y, 
+                                     text=f"({pk['h']}{pk['k']}{pk['l']})", 
+                                     showarrow=False, font=dict(size=8,color=lc,family="serif"),
+                                     xanchor="center", yanchor="bottom")
+        
+        # Layout styling for publication quality
         fig.update_layout(
             template='simple_white' if bg_theme=="Light Mode" else plot_theme,
-            font=dict(family='Arial', size=11),
-            legend=dict(x=0.02, y=0.98, bgcolor='rgba(255,255,255,0.8)', bordercolor='black', borderwidth=1),
-            width=None, height=600, margin=dict(l=80, r=40, t=40, b=60)
+            font=dict(family='Arial, sans-serif', size=11),
+            legend=dict(x=0.98, y=0.98, bgcolor='rgba(255,255,255,0.9)', bordercolor='black', borderwidth=1, font=dict(size=9)),
+            width=None, height=650, margin=dict(l=80, r=40, t=40, b=60),
+            hovermode='x unified'
         )
-        fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='lightgray', row=1, col=1, showticklabels=False)
-        fig.update_xaxes(title_text=r'2$\theta$ (°)', showgrid=True, gridwidth=1, gridcolor='lightgray', row=2, col=1)
-        fig.update_yaxes(title_text='Intensity (a.u.)', showgrid=True, gridwidth=1, gridcolor='lightgray', row=1, col=1)
-        fig.update_yaxes(title_text='ΔI', showgrid=True, gridwidth=1, gridcolor='lightgray', row=2, col=1)
+        
+        # Axis styling
+        fig.update_xaxes(title_text=r'2θ (°)', showgrid=True, gridwidth=1, gridcolor='lightgray', row=1, col=1, showticklabels=False, minor=dict(showgrid=True, gridcolor='lightgray', gridwidth=0.5))
+        fig.update_xaxes(title_text=r'2θ (°)', showgrid=True, gridwidth=1, gridcolor='lightgray', row=2, col=1, minor=dict(showgrid=True, gridcolor='lightgray', gridwidth=0.5))
+        fig.update_yaxes(title_text='Intensity (arb. units)', showgrid=True, gridwidth=1, gridcolor='lightgray', row=1, col=1, minor=dict(showgrid=True, gridcolor='lightgray', gridwidth=0.5))
+        fig.update_yaxes(title_text='ΔI', showgrid=True, gridwidth=1, gridcolor='lightgray', row=2, col=1, range=[diff_offset-offset*0.3, diff_offset+offset*0.3], minor=dict(showgrid=True, gridcolor='lightgray', gridwidth=0.5))
         
         st.plotly_chart(fig, use_container_width=True)
         
