@@ -449,7 +449,6 @@ def parse_file_content(content: str, filename: str) -> Tuple[np.ndarray, np.ndar
         try:
             if len(parts) >= 2: data.append((float(parts[0]), float(parts[1])))
         except ValueError: continue
-    # ✅ FIXED SYNTAX ERROR: Added 'data:' to complete the condition
     if not data:
         raise ValueError("Cannot parse — expected 2 columns: 2θ and Intensity.")
     arr = np.array(data); tt, I = arr[:, 0], arr[:, 1]
@@ -630,57 +629,76 @@ with tab_fit:
             fig.add_trace(go.Scatter(x=tt, y=Iph + r["Ibg"], mode="lines", name=f"{ph.name} ({wf:.1f}%)", line=dict(color=ph.color, width=1.6, dash="dash"), opacity=0.8), row=1, col=1)
         fig.add_trace(go.Scatter(x=tt, y=r["Icalc"], mode="lines", name="I_calc", line=dict(color="#fbbf24", width=2.2)), row=1, col=1)
         
-        # 🏷️ ADD MILLER INDEX LABELS TO PEAKS
+        # 🏷️ ADD MILLER INDEX LABELS TO PEAKS (FIXED VISIBILITY)
         if show_hkl_labels:
             y_max = float(Iobs.max())
             y_min = float(Iobs.min())
-            y_range = y_max - y_min
-            label_y_pos = y_max + (y_range * hkl_label_offset / 100)
+            y_range = y_max - y_min if y_max > y_min else 1000  # Prevent division by zero
+            
+            # Place labels at 115% of max height so they're always visible above peaks
+            label_y_pos = y_max + (y_range * 0.15)
             
             for i, ph_obj in enumerate(refiner.phases):
                 a_ref, c_ref = float(pp_vec[i][1]), float(pp_vec[i][2])
                 ph_ref = _make_refined_phase(ph_obj, a_ref, c_ref)
                 pks = generate_reflections(ph_ref, wl=wavelength, tt_min=float(tt.min()), tt_max=float(tt.max()))
                 
-                # Add tick marks for peaks
-                y_tick = y_min - 0.05 * y_range
+                # ✅ FIXED: Add visible tick marks BELOW the data at 5% of range
+                y_tick = y_min - (y_range * 0.08)
                 fig.add_trace(go.Scatter(
                     x=[p["tt"]+z_shift for p in pks], y=[y_tick]*len(pks), mode="markers",
-                    marker=dict(symbol="line-ns", size=11, color=ph_obj.color, line=dict(width=2, color=ph_obj.color)),
-                    name=f"{ph_obj.name} hkl", showlegend=False
+                    marker=dict(symbol="triangle-up", size=14, color=ph_obj.color, line=dict(width=2, color=ph_obj.color)),
+                    name=f"{ph_obj.name} hkl", showlegend=True
                 ), row=1, col=1)
                 
-                # Add (hkl) text labels above peaks
+                # ✅ FIXED: Add (hkl) text labels above peaks with better visibility
                 label_color = ph_obj.color if hkl_color == "phase" else hkl_color
                 for pk in pks:
                     hkl_text = f"({pk['h']} {pk['k']} {pk['l']})"
                     fig.add_annotation(
                         x=pk["tt"] + z_shift, y=label_y_pos,
                         text=hkl_text, showarrow=False,
-                        font=dict(size=hkl_font_size, color=label_color, family="IBM Plex Mono"),
+                        font=dict(size=hkl_font_size, color=label_color, family="IBM Plex Mono", weight="bold"),
                         xanchor="center", yanchor="bottom",
-                        bordercolor=border_color, borderwidth=1, borderpad=2,
-                        bgcolor="rgba(0,0,0,0.3)" if bg_theme == "Dark Mode" else "rgba(255,255,255,0.7)"
+                        bgcolor="rgba(0,0,0,0.4)" if bg_theme == "Dark Mode" else "rgba(255,255,255,0.85)",
+                        bordercolor=border_color, borderwidth=1, borderpad=3
                     )
         else:
             # Just add tick marks without labels
-            y_tick = float(Iobs.min()) - 0.05*(float(Iobs.max()) - float(Iobs.min()))
+            y_max = float(Iobs.max())
+            y_min = float(Iobs.min())
+            y_range = y_max - y_min if y_max > y_min else 1000
+            y_tick = y_min - (y_range * 0.08)
+            
             for i, ph_obj in enumerate(refiner.phases):
                 a_ref, c_ref = float(pp_vec[i][1]), float(pp_vec[i][2])
                 ph_ref = _make_refined_phase(ph_obj, a_ref, c_ref)
                 pks = generate_reflections(ph_ref, wl=wavelength, tt_min=float(tt.min()), tt_max=float(tt.max()))
                 fig.add_trace(go.Scatter(
                     x=[p["tt"]+z_shift for p in pks], y=[y_tick]*len(pks), mode="markers",
-                    marker=dict(symbol="line-ns", size=11, color=ph_obj.color, line=dict(width=2, color=ph_obj.color)),
-                    name=f"{ph_obj.name} hkl", showlegend=False
+                    marker=dict(symbol="triangle-up", size=14, color=ph_obj.color, line=dict(width=2, color=ph_obj.color)),
+                    name=f"{ph_obj.name} hkl", showlegend=True
                 ), row=1, col=1)
         
         fig.add_trace(go.Scatter(x=tt, y=r["diff"], mode="lines", name="Δ obs−calc", line=dict(color="#818cf8", width=1), fill="tozeroy", fillcolor="rgba(129,140,248,0.12)"), row=2, col=1)
         fig.add_hline(y=0, line=dict(color="#334155", width=1, dash="dash"), row=2, col=1)
-        fig.update_layout(template=plot_theme, height=650, legend=dict(font=dict(size=11), x=1.01, y=1), margin=dict(l=65, r=210, t=15, b=55), font=dict(family="IBM Plex Sans"))
-        fig.update_xaxes(title_text="2θ (°)", row=2, col=1)
-        fig.update_yaxes(title_text="Intensity (counts)", row=1, col=1)
-        fig.update_yaxes(title_text="Δ", row=2, col=1)
+        
+        # ✅ FIXED: Set explicit y-axis range to include tick marks and labels
+        y_max = float(Iobs.max())
+        y_min = float(Iobs.min())
+        y_range = y_max - y_min if y_max > y_min else 1000
+        y_bottom = y_min - (y_range * 0.12)  # Space for ticks
+        y_top = y_max + (y_range * 0.25)     # Space for labels
+        
+        fig.update_layout(
+            template=plot_theme, height=650, 
+            legend=dict(font=dict(size=11), x=1.02, y=1.0, bgcolor="rgba(0,0,0,0)"),
+            margin=dict(l=65, r=210, t=15, b=55), 
+            font=dict(family="IBM Plex Sans")
+        )
+        fig.update_yaxes(range=[y_bottom, y_top], title_text="Intensity (counts)", row=1, col=1, gridcolor="#0f172a")
+        fig.update_xaxes(title_text="2θ (°)", row=2, col=1, gridcolor="#0f172a")
+        fig.update_yaxes(title_text="Δ", row=2, col=1, gridcolor="#0f172a")
         st.plotly_chart(fig, use_container_width=True)
         df_pat = pd.DataFrame({"two_theta": tt, "I_obs": Iobs, "I_calc": r["Icalc"], "I_background": r["Ibg"], "difference": r["diff"], **{f"I_{k}": v for k, v in r["contribs"].items()}})
         st.download_button("⬇ Download pattern CSV", data=df_pat.to_csv(index=False), file_name="rietveld_pattern.csv", mime="text/csv")
