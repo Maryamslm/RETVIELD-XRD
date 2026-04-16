@@ -9,6 +9,7 @@
 ╚══════════════════════════════════════════════════════════════════╝
 """
 
+import streamlit as st
 import time
 import warnings
 import xml.etree.ElementTree as ET
@@ -18,16 +19,20 @@ import requests
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-import streamlit as st
 from plotly.subplots import make_subplots
 from scipy.optimize import least_squares
 from scipy.signal import savgol_filter
-import matplotlib
-import matplotlib.pyplot as plt
-from io import BytesIO
 
-# Set non-interactive backend for matplotlib to avoid GUI warnings on servers
-matplotlib.use('Agg')
+# Optional Matplotlib import for publication plots
+try:
+    import matplotlib
+    import matplotlib.pyplot as plt
+    matplotlib.use('Agg')  # Required for Streamlit
+    MATPLOTLIB_OK = True
+except ImportError:
+    MATPLOTLIB_OK = False
+    st.warning("Matplotlib not found. Publication plots will be disabled.")
+
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 # ═══════════════════════════════════════════════════════════════════
@@ -110,6 +115,9 @@ def create_publication_figure(tt, I_obs, I_calc, I_bg, I_diff, phase_ticks,
     ax_main.text(0.98, 0.98, info, transform=ax_main.transAxes, fontsize=9, verticalalignment='top', horizontalalignment='right', fontfamily='serif', bbox=props, zorder=10)
     
     plt.tight_layout()
+    
+    # Save to BytesIO
+    from io import BytesIO
     buf = BytesIO()
     fig.savefig(buf, format='png', dpi=300, bbox_inches='tight', facecolor='white')
     buf.seek(0)
@@ -339,13 +347,13 @@ def parse_file_content(content, filename):
             
     lines=[ln.strip() for ln in content.splitlines() if ln.strip() and ln.strip()[0] not in "#!/'\";"]
     data=[]
-    # Correct indentation here to ensure try/except is inside the loop
+    # Fixed indentation here to ensure try/except is inside the loop
     for ln in lines: 
         parts = ln.replace(",", " ").split()
         try:
             if len(parts)>=2: data.append((float(parts[0]), float(parts[1])))
         except ValueError:
-            continue # Now inside the loop
+            continue
             
     if not data: raise ValueError("Cannot parse.")
     arr = np.array(data)
@@ -503,14 +511,17 @@ with tabs[0]:
             with c3: fmt=st.selectbox("Format", ["PNG","PDF","SVG"])
             
             if st.button("🎨 Generate & Download"):
-                plt.rcParams['figure.figsize']=(fig_w, fig_h)
-                phase_ticks={}
-                for i,ph in enumerate(refiner.phases):
-                    a_r,c_r=float(pp_vec[i][1]),float(pp_vec[i][2]); pks=generate_reflections(_make_refined_phase(ph,a_r,c_r),wl=wavelength,tt_min=float(tt.min()),tt_max=float(tt.max()))
-                    phase_ticks[ph.name]=[p["tt"]+z_shift for p in pks]
-                buf=create_publication_figure(tt, Iobs, r["Icalc"], r["Ibg"], r["diff"], phase_ticks, rwp*100, rp*100, chi2, gof, st.session_state.selected_sample or "Co-Cr", f"{wl_label} ({wavelength}Å)", smooth)
-                st.image(buf)
-                st.download_button(f"📥 Download .{fmt.lower()}", buf, f"rietveld_plot.{fmt.lower()}", f"image/{fmt.lower()}")
+                if not MATPLOTLIB_OK:
+                    st.error("This feature requires 'matplotlib'. Please add it to your requirements.txt and deploy again.")
+                else:
+                    plt.rcParams['figure.figsize']=(fig_w, fig_h)
+                    phase_ticks={}
+                    for i,ph in enumerate(refiner.phases):
+                        a_r,c_r=float(pp_vec[i][1]),float(pp_vec[i][2]); pks=generate_reflections(_make_refined_phase(ph,a_r,c_r),wl=wavelength,tt_min=float(tt.min()),tt_max=float(tt.max()))
+                        phase_ticks[ph.name]=[p["tt"]+z_shift for p in pks]
+                    buf=create_publication_figure(tt, Iobs, r["Icalc"], r["Ibg"], r["diff"], phase_ticks, rwp*100, rp*100, chi2, gof, st.session_state.selected_sample or "Co-Cr", f"{wl_label} ({wavelength}Å)", smooth)
+                    st.image(buf, caption="Publication Plot Preview")
+                    st.download_button(f"📥 Download .{fmt.lower()}", buf, f"rietveld_plot.{fmt.lower()}", f"image/{fmt.lower()}")
         
         df=pd.DataFrame({"2θ":tt,"I_obs":Iobs,"I_calc":r["Icalc"],"I_bg":r["Ibg"],"Diff":r["diff"],**{f"I_{k}":v for k,v in r["contribs"].items()}})
         st.download_button("⬇ Data CSV", df.to_csv(index=False), "rietveld_data.csv", "text/csv")
