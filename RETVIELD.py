@@ -23,15 +23,15 @@ from plotly.subplots import make_subplots
 from scipy.optimize import least_squares
 from scipy.signal import savgol_filter
 
-# Optional Matplotlib import for publication plots
+# ─── Matplotlib Import (Optional for Publication Plots) ───
 try:
     import matplotlib
     import matplotlib.pyplot as plt
-    matplotlib.use('Agg')  # Required for Streamlit
+    matplotlib.use('Agg')  # Required for server-side rendering
     MATPLOTLIB_OK = True
 except ImportError:
     MATPLOTLIB_OK = False
-    st.warning("Matplotlib not found. Publication plots will be disabled.")
+    # Warning will be shown in the UI later if needed
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
@@ -565,11 +565,43 @@ with tabs[3]:
 with tabs[4]:
     if st.session_state["results"] is None: st.info("Run first.")
     else:
-        r,tt,elapsed=st.session_state["results"],st.session_state["tt"],st.session_state["elapsed"]
-        md=["# Rietveld Report", f"**Date:** {pd.Timestamp.now():%Y-%m-%d}", f"**WL:** {wl_label} ({wavelength}Å)", f"**Pts:** {len(tt)}", f"**2θ:** {tt.min():.1f}-{tt.max():.1f}°", f"**Time:** {elapsed:.1f}s", "---", "|R_wp|Rp|χ²|GOF|","|---|---|---|---|",f"|{r['Rwp']*100:.2f}%|{r['Rp']*100:.2f}%|{r['chi2']:.3f}|{r['GOF']:.3f}|","---"]
-        md.append("|Phase|wt%|a(Å)|c(Å)|"); md.append("|---|---|---|---|")
-        for k,w in r["wf"].items(): md.append(f"|{PHASE_DB[k].name}|{w*100:.2f}|{r['lat'][k]['a_ref']:.4f}|{r['lat'][k]['c_ref']:.4f if PHASE_DB[k].c!=PHASE_DB[k].a else '—'}|")
-        st.markdown("\n".join(md)); st.download_button("📄 Report MD", "\n".join(md), "report.md", "text/markdown")
+        r, tt, elapsed = st.session_state["results"], st.session_state["tt"], st.session_state["elapsed"]
+        
+        md = []
+        md.append("# Rietveld Refinement Report")
+        md.append(f"**Date:** {pd.Timestamp.now():%Y-%m-%d}")
+        md.append(f"**WL:** {wl_label} ({wavelength}Å)")
+        md.append(f"**Pts:** {len(tt)}")
+        md.append(f"**2θ:** {tt.min():.1f}-{tt.max():.1f}°")
+        md.append(f"**Time:** {elapsed:.1f}s")
+        md.append("---")
+        
+        md.append("|R_wp|Rp|χ²|GOF|")
+        md.append("|---|---|---|---|")
+        md.append(f"|{r['Rwp']*100:.2f}%|{r['Rp']*100:.2f}%|{r['chi2']:.3f}|{r['GOF']:.3f}|")
+        md.append("---")
+        
+        md.append("|Phase|wt%|a(Å)|c(Å)|")
+        md.append("|---|---|---|---|")
+        
+        # Fixed Syntax: Logic for 'c_ref' calculation separated to avoid f-string error
+        for k, w in r["wf"].items():
+            ph = PHASE_DB[k]
+            lat_info = r['lat'][k]
+            
+            # Calculate a_ref string
+            a_ref_str = f"{lat_info['a_ref']:.4f}"
+            
+            # Calculate c_ref string safely
+            if ph.c != ph.a:
+                c_ref_str = f"{lat_info['c_ref']:.4f}"
+            else:
+                c_ref_str = "—"
+            
+            md.append(f"|{ph.name}|{w*100:.2f}|{a_ref_str}|{c_ref_str}|")
+            
+        st.markdown("\n".join(md))
+        st.download_button("📄 Report MD", "\n".join(md), "report.md", "text/markdown")
 
 with tabs[5]:
     st.markdown("## ℹ️ About\nFull-profile Rietveld refinement for SLM/DMLS Co-Cr alloys.\n**Features:** GitHub loading, Gaussian/Lorentzian/PV profiles, Savitzky-Golay smoothing, publication export, phase labeling.\n```bash\npip install streamlit numpy scipy pandas plotly requests matplotlib\nstreamlit run RETVIELD.py\n```")
