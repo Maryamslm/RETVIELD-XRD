@@ -1,7 +1,7 @@
 """
 ╔══════════════════════════════════════════════════════════════════╗
 ║   Co-Cr Dental Alloy · Full Rietveld XRD Refinement             ║
-║   Single-file Streamlit Application with GitHub File Selector   ║
+║   Single-file Streamlit Application with Theme & UI Controls    ║
 ║   Supports .ASC (two-column text) and .XRDML (Panalytical XML)  ║
 ║                                                                  ║
 ║   Usage:  streamlit run RETVIELD.py                              ║
@@ -54,54 +54,53 @@ AVAILABLE_FILES = {
 }
 
 # ═══════════════════════════════════════════════════════════════════
-# GLOBAL CSS
+# APPEARANCE & THEME CONFIG
 # ═══════════════════════════════════════════════════════════════════
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;600;700&display=swap');
-html, body, [class*="css"] { font-family: 'IBM Plex Sans', sans-serif; }
-code, pre { font-family: 'IBM Plex Mono', monospace; }
-[data-testid="stSidebar"] {
-    background: linear-gradient(180deg,#030712 0%,#0c1524 100%);
-    border-right: 1px solid #1e293b;
-}
-[data-testid="stSidebar"] * { color:#e2e8f0 !important; }
-.hero {
-    background: linear-gradient(135deg,#020617 0%,#0f2a4a 45%,#020617 100%);
-    border: 1px solid #1e3a5f55; border-radius: 14px;
-    padding: 28px 36px 22px; margin-bottom: 22px; position: relative; overflow: hidden;
-}
-.hero h1 {
-    font-size:1.9rem; font-weight:700; letter-spacing:-.02em;
-    background: linear-gradient(100deg,#38bdf8 0%,#818cf8 50%,#34d399 100%);
-    -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin:0 0 6px;
-}
-.hero p { color:#64748b; margin:0; font-size:.88rem; font-weight:300; line-height:1.5; }
-.badge {
-    display:inline-block; font-size:.7rem; font-weight:600; letter-spacing:.06em;
-    padding:2px 9px; border-radius:99px; margin-right:6px; margin-top:10px; border:1px solid;
-}
-.badge-cu  { color:#f59e0b; border-color:#f59e0b44; background:#f59e0b10; }
-.badge-iso { color:#34d399; border-color:#34d39944; background:#34d39910; }
-.badge-slm { color:#818cf8; border-color:#818cf844; background:#818cf810; }
-.mstrip { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:18px; }
-.mc { background:#080e1a; border:1px solid #1e293b; border-radius:10px; padding:12px 18px; flex:1; min-width:110px; }
-.mc .lbl { font-size:.68rem; color:#475569; letter-spacing:.1em; text-transform:uppercase; }
-.mc .val { font-size:1.45rem; font-weight:700; color:#f1f5f9; font-family:'IBM Plex Mono',monospace; }
-.mc .sub { font-size:.7rem; color:#334155; }
-.sh { font-size:.7rem; font-weight:700; letter-spacing:.14em; text-transform:uppercase;
-      color:#334155; border-bottom:1px solid #1e293b; padding-bottom:4px; margin:16px 0 10px; }
-.stButton > button[kind="primary"] {
-    background: linear-gradient(135deg,#1d4ed8,#7c3aed) !important;
-    border:none !important; border-radius:8px !important; font-weight:600 !important; letter-spacing:.03em !important;
-}
-</style>
-""", unsafe_allow_html=True)
+def apply_theme(bg_theme: str, font_size: float, primary_color: str):
+    themes = {
+        "Dark Mode": {"bg": "#020617", "text": "#e2e8f0", "sidebar": "#030712", "panel": "#080e1a", "border": "#1e293b"},
+        "Light Mode": {"bg": "#f8fafc", "text": "#0f172a", "sidebar": "#ffffff", "panel": "#f1f5f9", "border": "#cbd5e1"},
+        "High Contrast": {"bg": "#000000", "text": "#00ff00", "sidebar": "#0a0a0a", "panel": "#111111", "border": "#00ff0044"}
+    }
+    t = themes.get(bg_theme, themes["Dark Mode"])
+    st.markdown(f"""
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;600;700&display=swap');
+        html, body, [class*="css"] {{ font-family: 'IBM Plex Sans', sans-serif !important; font-size: {font_size}rem !important; }}
+        code, pre {{ font-family: 'IBM Plex Mono', monospace !important; }}
+        
+        /* Main App Background */
+        [data-testid="stAppViewContainer"] > .main {{ background-color: {t['bg']} !important; color: {t['text']} !important; }}
+        [data-testid="stHeader"] {{ background: transparent; }}
+        
+        /* Sidebar */
+        [data-testid="stSidebar"] {{ background: {t['sidebar']} !important; border-right: 1px solid {t['border']}; }}
+        [data-testid="stSidebar"] * {{ color: {t['text']} !important; }}
+        [data-testid="stSidebar"] .stSlider label, [data-testid="stSidebar"] .stCheckbox label {{ color: #94a3b8 !important; }}
+        
+        /* UI Elements */
+        .stButton > button {{ border-radius: 8px !important; font-weight: 600 !important; letter-spacing: .03em !important; }}
+        .stButton > button[kind="primary"] {{ background: linear-gradient(135deg, {primary_color}, #7c3aed) !important; border: none !important; color: white !important; }}
+        .hero {{ background: linear-gradient(135deg, {t['bg']} 0%, {t['panel']} 45%, {t['bg']} 100%); border: 1px solid {t['border']}; border-radius: 14px; padding: 28px 36px 22px; margin-bottom: 22px; position: relative; overflow: hidden; }}
+        .hero h1 {{ font-size: 1.9rem; font-weight: 700; letter-spacing: -.02em; background: linear-gradient(100deg, {primary_color} 0%, #818cf8 50%, #34d399 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 0 0 6px; }}
+        .hero p {{ color: #64748b; margin: 0; font-size: .88rem; font-weight: 300; line-height: 1.5; }}
+        .badge {{ display: inline-block; font-size: .7rem; font-weight: 600; letter-spacing: .06em; padding: 2px 9px; border-radius: 99px; margin-right: 6px; margin-top: 10px; border: 1px solid; }}
+        .badge-cu {{ color: #f59e0b; border-color: #f59e0b44; background: #f59e0b10; }}
+        .badge-iso {{ color: #34d399; border-color: #34d39944; background: #34d39910; }}
+        .badge-slm {{ color: #818cf8; border-color: #818cf844; background: #818cf810; }}
+        .mstrip {{ display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 18px; }}
+        .mc {{ background: {t['panel']}; border: 1px solid {t['border']}; border-radius: 10px; padding: 12px 18px; flex: 1; min-width: 110px; }}
+        .mc .lbl {{ font-size: .68rem; color: #475569; letter-spacing: .1em; text-transform: uppercase; }}
+        .mc .val {{ font-size: 1.45rem; font-weight: 700; color: {t['text']}; font-family: 'IBM Plex Mono', monospace; }}
+        .mc .sub {{ font-size: .7rem; color: #334155; }}
+        .sh {{ font-size: .7rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: #334155; border-bottom: 1px solid {t['border']}; padding-bottom: 4px; margin: 16px 0 10px; }}
+    </style>
+    """, unsafe_allow_html=True)
+    return t['border']
 
 # ═══════════════════════════════════════════════════════════════════
 # CRYSTAL STRUCTURE LIBRARY
 # ═══════════════════════════════════════════════════════════════════
-
 @dataclass
 class AtomSite:
     element: str
@@ -142,8 +141,6 @@ class Phase:
 
 def _build_phase_db() -> Dict[str, Phase]:
     db: Dict[str, Phase] = {}
-    
-    # PRIMARY PHASES
     db["gamma_Co"] = Phase(key="gamma_Co", name="γ-Co (FCC)", formula="Co", pdf_card="PDF 15-0806",
         crystal_system="cubic", space_group="Fm-3m", sg_number=225, a=3.5447, b=3.5447, c=3.5447,
         atoms=[AtomSite("Co", "4a", 0, 0, 0, 1.0, 0.40)], wf_init=0.70, color="#38bdf8", group="Primary",
@@ -152,8 +149,6 @@ def _build_phase_db() -> Dict[str, Phase]:
         crystal_system="hexagonal", space_group="P63/mmc", sg_number=194, a=2.5071, b=2.5071, c=4.0686,
         alpha=90, beta=90, gamma=120, atoms=[AtomSite("Co", "2c", 1/3, 2/3, 0.25, 1.0, 0.40)],
         wf_init=0.15, color="#fb923c", group="Primary", description="HCP cobalt — martensitic transform.")
-    
-    # SECONDARY PHASES
     db["sigma"] = Phase(key="sigma", name="σ-phase (CoCr)", formula="CoCr", pdf_card="PDF 29-0490",
         crystal_system="tetragonal", space_group="P42/mnm", sg_number=136, a=8.7960, b=8.7960, c=4.5750,
         atoms=[AtomSite("Co", "2a", 0, 0, 0, 0.5, 0.50), AtomSite("Cr", "2a", 0, 0, 0, 0.5, 0.50),
@@ -174,22 +169,16 @@ def _build_phase_db() -> Dict[str, Phase]:
         alpha=90, beta=90, gamma=120, atoms=[AtomSite("Co", "6h", 1/6, 1/3, 0.25, 1.0, 0.50),
                AtomSite("Mo", "2c", 1/3, 2/3, 0.25, 1.0, 0.55)], wf_init=0.02, color="#a78bfa", group="Secondary",
         description="Hexagonal Co₃Mo — high-T annealing precipitate.")
-
-    # CARBIDES
     db["M23C6"] = Phase(key="M23C6", name="M₂₃C₆ Carbide", formula="Cr23C6", pdf_card="PDF 36-0803",
         crystal_system="cubic", space_group="Fm-3m", sg_number=225, a=10.61, b=10.61, c=10.61,
         atoms=[AtomSite("Cr", "24e", 0.35, 0, 0, 1.0, 0.50), AtomSite("Cr", "32f", 0.35, 0.35, 0.35, 1.0, 0.50),
-               AtomSite("C", "32f", 0.30, 0.30, 0.30, 1.0, 0.50)], 
-        wf_init=0.05, color="#eab308", group="Carbides",
+               AtomSite("C", "32f", 0.30, 0.30, 0.30, 1.0, 0.50)], wf_init=0.05, color="#eab308", group="Carbides",
         description="Cr₂₃C₆ type; very common in cast alloys with carbon; detected by characteristic low-angle peaks.")
     db["M6C"] = Phase(key="M6C", name="M₆C Carbide", formula="(Co,Mo)6C", pdf_card="PDF 27-0408",
         crystal_system="cubic", space_group="Fd-3m", sg_number=227, a=10.99, b=10.99, c=10.99,
         atoms=[AtomSite("Mo", "16c", 0, 0, 0, 0.5, 0.50), AtomSite("Co", "16d", 0.5, 0.5, 0.5, 0.5, 0.50),
-               AtomSite("C", "48f", 0.375, 0.375, 0.375, 1.0, 0.50)], 
-        wf_init=0.05, color="#f97316", group="Carbides",
+               AtomSite("C", "48f", 0.375, 0.375, 0.375, 1.0, 0.50)], wf_init=0.05, color="#f97316", group="Carbides",
         description="Mo/W-rich; found in Mo- or W-containing alloys.")
-
-    # LAVES PHASE
     db["Laves"] = Phase(key="Laves", name="Laves Phase (Co₂Mo)", formula="Co2Mo", pdf_card="PDF 03-1225",
         crystal_system="hexagonal", space_group="P63/mmc", sg_number=194, a=4.73, b=4.73, c=7.72,
         alpha=90, beta=90, gamma=120,
@@ -197,8 +186,6 @@ def _build_phase_db() -> Dict[str, Phase]:
                AtomSite("Co", "6h", 0.45, 0.90, 0.25, 1.0, 0.50)],
         wf_init=0.05, color="#d946ef", group="Laves",
         description="Hexagonal intermetallic precipitate; forms in Co-Mo/W systems; often brittle.")
-
-    # OXIDES
     db["Cr2O3"] = Phase(key="Cr2O3", name="Cr₂O₃ (Eskolaite)", formula="Cr2O3", pdf_card="PDF 38-1479",
         crystal_system="trigonal", space_group="R-3m", sg_number=167, a=4.9580, b=4.9580, c=13.5942,
         alpha=90, beta=90, gamma=120, atoms=[AtomSite("Cr", "12c", 0, 0, 0.348, 1.0, 0.55),
@@ -230,15 +217,12 @@ def _allow_hcp(h, k, l): return not (l%2 != 0 and (h-k)%3 == 0)
 def _allow_sig(h, k, l): return (h+k+l) % 2 == 0
 def _allow_all(h, k, l): return True
 def _allow_fd3m(h, k, l):
-    # Fd-3m systematic absences: h,k,l unmixed. If all even, h+k+l=4n
     if (h%2 != k%2) or (k%2 != l%2): return False
     if (h%2 != 0): return True
     return (h+k+l) % 4 == 0
 
-_ALLOW = {
-    "Fm-3m": _allow_fcc, "Im-3m": _allow_bcc, "P63/mmc": _allow_hcp, 
-    "P42/mnm": _allow_sig, "R-3m": _allow_all, "Fd-3m": _allow_fd3m
-}
+_ALLOW = {"Fm-3m": _allow_fcc, "Im-3m": _allow_bcc, "P63/mmc": _allow_hcp, 
+          "P42/mnm": _allow_sig, "R-3m": _allow_all, "Fd-3m": _allow_fd3m}
 
 _CM: Dict[str, Tuple] = {
     "Co": ([2.7686,2.2087,1.6079,1.0000],[14.178,3.398,0.124,41.698],0.9768),
@@ -444,7 +428,8 @@ def parse_file_content(content: str, filename: str) -> Tuple[np.ndarray, np.ndar
         try:
             if len(parts) >= 2: data.append((float(parts[0]), float(parts[1])))
         except ValueError: continue
-    if not 
+    # ✅ FIXED SYNTAX ERROR: Added 'data' to the condition
+    if not data:
         raise ValueError("Cannot parse — expected 2 columns: 2θ and Intensity.")
     arr = np.array(data); tt, I = arr[:, 0], arr[:, 1]
     if tt.max() < 5: tt = np.degrees(tt)
@@ -479,6 +464,16 @@ for _k in ("results", "refiner", "tt", "Iobs", "elapsed", "selected_sample", "so
 
 with st.sidebar:
     st.markdown("## ⚙️ Setup")
+    
+    # 🎨 APPEARANCE CONTROLS
+    st.markdown('<div class="sh">🎨 Appearance & Theme</div>', unsafe_allow_html=True)
+    bg_theme = st.selectbox("Background Theme", ["Dark Mode", "Light Mode", "High Contrast"])
+    font_size = st.slider("Font Size Scale", 0.8, 1.3, 1.0, 0.05)
+    primary_color = st.color_picker("Primary Accent Color", "#38bdf8")
+    plot_theme = st.selectbox("Plot Color Map", ["plotly_dark", "plotly_white", "plotly_light"])
+    
+    border_color = apply_theme(bg_theme, font_size, primary_color)
+
     st.markdown('<div class="sh">📁 GitHub Repository Files</div>', unsafe_allow_html=True)
     sample_options = list(AVAILABLE_FILES.keys())
     selected_sample = st.selectbox("Select XRD Sample", options=sample_options, index=0)
@@ -512,24 +507,16 @@ with st.sidebar:
     tt_lo, tt_hi = st.slider("", 10.0, 120.0, (15.0, 95.0), 0.5)
     st.markdown('<div class="sh">🧊 Phase Selection</div>', unsafe_allow_html=True)
     sel_keys: List[str] = []
-    
-    # Updated Phase Groups to include new Carbides and Laves
     phase_groups = [
-        ("Primary phases", PRIMARY_KEYS, True),
-        ("Secondary phases", SECONDARY_KEYS, True),
-        ("Carbides", CARBIDE_KEYS, True),
-        ("Laves Phase", LAVES_KEYS, True),
-        ("Oxide phases", OXIDE_KEYS, False),
+        ("Primary phases", PRIMARY_KEYS, True), ("Secondary phases", SECONDARY_KEYS, True),
+        ("Carbides", CARBIDE_KEYS, True), ("Laves Phase", LAVES_KEYS, True), ("Oxide phases", OXIDE_KEYS, False),
     ]
-    
     for grp, keys, exp in phase_groups:
         with st.expander(grp, expanded=exp):
             for k in keys:
-                ph = PHASE_DB[k]
-                default = k in (PRIMARY_KEYS + SECONDARY_KEYS[:2])
+                ph = PHASE_DB[k]; default = k in (PRIMARY_KEYS + SECONDARY_KEYS[:2])
                 if st.checkbox(f"{ph.name} · {ph.formula}", value=default, key=f"ck_{k}", help=ph.description):
                     sel_keys.append(k)
-    
     if not sel_keys: st.warning("⚠️ Select at least one phase.")
     st.markdown('<div class="sh">🔧 Refinement Flags</div>', unsafe_allow_html=True)
     c1, c2 = st.columns(2)
@@ -542,7 +529,7 @@ with st.sidebar:
 # ═══════════════════════════════════════════════════════════════════
 # HERO & RUN
 # ═══════════════════════════════════════════════════════════════════
-st.markdown("""
+st.markdown(f"""
 <div class="hero">
   <h1>🔬 Co-Cr Dental Alloy · Rietveld XRD Refinement</h1>
   <p>Full-profile Rietveld refinement for 3D-printed (SLM / DMLS) cobalt-chromium dental alloys<br>
@@ -577,8 +564,8 @@ with tab_fit:
     if st.session_state["results"] is None:
         if tt_raw is not None:
             mask = (tt_raw >= tt_lo) & (tt_raw <= tt_hi)
-            fig = go.Figure(go.Scatter(x=tt_raw[mask], y=I_raw[mask], mode="lines", line=dict(color="#38bdf8", width=1), name="I_obs"))
-            fig.update_layout(template="plotly_dark", paper_bgcolor="#030712", plot_bgcolor="#030712", xaxis_title="2θ (°)", yaxis_title="Intensity (counts)", height=350, margin=dict(l=60,r=20,t=20,b=50))
+            fig = go.Figure(go.Scatter(x=tt_raw[mask], y=I_raw[mask], mode="lines", line=dict(color=primary_color, width=1), name="I_obs"))
+            fig.update_layout(template=plot_theme, xaxis_title="2θ (°)", yaxis_title="Intensity (counts)", height=350, margin=dict(l=60,r=20,t=20,b=50))
             st.plotly_chart(fig, use_container_width=True)
         st.info("👈 Select a file and press **▶ Run Rietveld Refinement**.")
     else:
@@ -607,10 +594,10 @@ with tab_fit:
             fig.add_trace(go.Scatter(x=[p["tt"]+z_shift for p in pks], y=[y_tick]*len(pks), mode="markers", marker=dict(symbol="line-ns", size=11, color=ph_obj.color, line=dict(width=2, color=ph_obj.color)), name=f"{ph_obj.name} hkl", showlegend=False), row=1, col=1)
         fig.add_trace(go.Scatter(x=tt, y=r["diff"], mode="lines", name="Δ obs−calc", line=dict(color="#818cf8", width=1), fill="tozeroy", fillcolor="rgba(129,140,248,0.12)"), row=2, col=1)
         fig.add_hline(y=0, line=dict(color="#334155", width=1, dash="dash"), row=2, col=1)
-        fig.update_layout(template="plotly_dark", paper_bgcolor="#030712", plot_bgcolor="#030712", height=650, legend=dict(bgcolor="#080e1a", bordercolor="#1e293b", font=dict(size=11), x=1.01, y=1), margin=dict(l=65, r=210, t=15, b=55), font=dict(family="IBM Plex Sans"))
-        fig.update_xaxes(title_text="2θ (°)", row=2, col=1, gridcolor="#0f172a", zerolinecolor="#0f172a")
-        fig.update_yaxes(title_text="Intensity (counts)", row=1, col=1, gridcolor="#0f172a", zerolinecolor="#0f172a")
-        fig.update_yaxes(title_text="Δ", row=2, col=1, gridcolor="#0f172a", zerolinecolor="#0f172a")
+        fig.update_layout(template=plot_theme, height=650, legend=dict(font=dict(size=11), x=1.01, y=1), margin=dict(l=65, r=210, t=15, b=55), font=dict(family="IBM Plex Sans"))
+        fig.update_xaxes(title_text="2θ (°)", row=2, col=1)
+        fig.update_yaxes(title_text="Intensity (counts)", row=1, col=1)
+        fig.update_yaxes(title_text="Δ", row=2, col=1)
         st.plotly_chart(fig, use_container_width=True)
         df_pat = pd.DataFrame({"two_theta": tt, "I_obs": Iobs, "I_calc": r["Icalc"], "I_background": r["Ibg"], "difference": r["diff"], **{f"I_{k}": v for k, v in r["contribs"].items()}})
         st.download_button("⬇ Download pattern CSV", data=df_pat.to_csv(index=False), file_name="rietveld_pattern.csv", mime="text/csv")
@@ -624,12 +611,12 @@ with tab_phase:
         with c1:
             fig_pie = go.Figure(go.Pie(labels=ph_names, values=wf_pct, hole=0.58, marker=dict(colors=ph_cols, line=dict(color="#030712", width=2.5)), textinfo="label+percent", textfont=dict(size=11.5, family="IBM Plex Sans"), hovertemplate="<b>%{label}</b><br>%{value:.2f} wt%<extra></extra>"))
             fig_pie.add_annotation(text="Weight<br>Fraction", x=0.5, y=0.5, font=dict(size=12, color="#64748b"), showarrow=False)
-            fig_pie.update_layout(template="plotly_dark", paper_bgcolor="#030712", showlegend=False, height=360, margin=dict(l=10,r=10,t=30,b=10), title=dict(text="Phase Composition", font=dict(size=13, color="#64748b")))
+            fig_pie.update_layout(template=plot_theme, showlegend=False, height=360, margin=dict(l=10,r=10,t=30,b=10), title=dict(text="Phase Composition", font=dict(size=13, color="#64748b")))
             st.plotly_chart(fig_pie, use_container_width=True)
         with c2:
             idx = list(np.argsort(wf_pct)[::-1])
             fig_bar = go.Figure(go.Bar(x=[wf_pct[i] for i in idx], y=[ph_names[i] for i in idx], orientation="h", marker=dict(color=[ph_cols[i] for i in idx]), text=[f"{wf_pct[i]:.2f} %" for i in idx], textposition="inside", insidetextfont=dict(color="white", size=11, family="IBM Plex Mono")))
-            fig_bar.update_layout(template="plotly_dark", paper_bgcolor="#030712", plot_bgcolor="#030712", xaxis_title="wt %", height=360, margin=dict(l=10,r=10,t=30,b=40), title=dict(text="Phase Distribution", font=dict(size=13, color="#64748b")), yaxis=dict(gridcolor="#0f172a"), xaxis=dict(gridcolor="#0f172a", range=[0, max(wf_pct)*1.15]))
+            fig_bar.update_layout(template=plot_theme, xaxis_title="wt %", height=360, margin=dict(l=10,r=10,t=30,b=40), title=dict(text="Phase Distribution", font=dict(size=13, color="#64748b")), yaxis=dict(gridcolor=border_color), xaxis=dict(gridcolor=border_color, range=[0, max(wf_pct)*1.15]))
             st.plotly_chart(fig_bar, use_container_width=True)
         st.markdown('<div class="sh">Phase Detail</div>', unsafe_allow_html=True)
         lat, rows = r["lat"], []
@@ -647,7 +634,7 @@ with tab_phase:
             if wm.get("Cr2O3",0) > 0.5 or wm.get("CoCr2O4",0) > 0.5: msgs.append(("🟠","Oxides",f"Cr₂O₃={wm.get('Cr2O3',0):.1f}% CoCr₂O₄={wm.get('CoCr2O4',0):.1f}%","Surface/internal oxide detected — check SLM atmosphere and powder storage."))
             if not msgs: msgs.append(("ℹ️","No dominant phases","—","Check phase selection and 2θ range."))
             for icon, name, pct, msg in msgs:
-                st.markdown(f"""<div style="background:#080e1a;border:1px solid #1e293b;border-radius:10px;padding:14px 18px;margin-bottom:10px;">
+                st.markdown(f"""<div style="background:#080e1a;border:1px solid {border_color};border-radius:10px;padding:14px 18px;margin-bottom:10px;">
                   <div style="font-weight:700;font-size:.95rem;margin-bottom:4px;">{icon} &nbsp;{name} &nbsp;<span style="font-family:'IBM Plex Mono';font-size:.82rem;color:#64748b;">{pct}</span></div>
                   <div style="color:#94a3b8;font-size:.85rem;line-height:1.55;">{msg}</div></div>""", unsafe_allow_html=True)
         st.download_button("⬇ Download phase table (.csv)", data=df_ph.to_csv(index=False), file_name="phase_analysis.csv", mime="text/csv")
@@ -700,7 +687,7 @@ with tab_params:
             lp = lat.get(ph_obj.key, {}); U, V, W = lp.get("U",.02), lp.get("V",-.01), lp.get("W",.005)
             fw = [caglioti(t, U, V, W) for t in tt_plot]
             fig_fw.add_trace(go.Scatter(x=tt_plot, y=fw, mode="lines", name=ph_obj.name, line=dict(color=ph_obj.color, width=2)))
-        fig_fw.update_layout(template="plotly_dark", paper_bgcolor="#030712", plot_bgcolor="#030712", xaxis_title="2θ (°)", yaxis_title="FWHM (°)", height=270, margin=dict(l=60,r=20,t=10,b=50), legend=dict(bgcolor="#080e1a", bordercolor="#1e293b", font=dict(size=10)), xaxis=dict(gridcolor="#0f172a"), yaxis=dict(gridcolor="#0f172a"))
+        fig_fw.update_layout(template=plot_theme, xaxis_title="2θ (°)", yaxis_title="FWHM (°)", height=270, margin=dict(l=60,r=20,t=10,b=50), legend=dict(font=dict(size=10)), xaxis=dict(gridcolor=border_color), yaxis=dict(gridcolor=border_color))
         st.plotly_chart(fig_fw, use_container_width=True)
 
 with tab_report:
@@ -767,8 +754,8 @@ with tab_about:
     ]
     st.markdown("\n".join(about_lines))
 
-st.markdown("""
-<hr style="border:none;border-top:1px solid #0f172a;margin-top:48px;">
+st.markdown(f"""
+<hr style="border:none;border-top:1px solid {border_color};margin-top:48px;">
 <p style="text-align:center;color:#1e293b;font-size:.72rem;margin-top:6px;">
   Co-Cr XRD Rietveld · Full-profile phase analysis for dental alloys ·
   Built with Streamlit & Plotly & GitHub API
