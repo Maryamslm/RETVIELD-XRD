@@ -269,13 +269,35 @@ def _make_refined_phase(ph: Phase, a_ref: float, c_ref: float) -> Phase:
                  atoms=ph.atoms, color=ph.color)
 
 # ═══════════════════════════════════════════════════════════════════
+# PROFILE FUNCTIONS: GAUSSIAN, LORENTZIAN, PSEUDO-VOIGT
+# ═══════════════════════════════════════════════════════════════════
+def gaussian_profile(tt: np.ndarray, tt_k: float, fwhm: float) -> np.ndarray:
+    """Gaussian peak profile."""
+    sigma = fwhm / (2.0 * np.sqrt(2.0 * np.log(2.0)))
+    return np.exp(-0.5 * ((tt - tt_k) / sigma)**2)
+
+def lorentzian_profile(tt: np.ndarray, tt_k: float, fwhm: float) -> np.ndarray:
+    """Lorentzian (Cauchy) peak profile."""
+    gamma = fwhm / 2.0
+    return (gamma**2) / ((tt - tt_k)**2 + gamma**2)
+
+def pseudo_voigt_profile(tt: np.ndarray, tt_k: float, fwhm: float, eta: float) -> np.ndarray:
+    """Pseudo-Voigt profile: linear combination of Gaussian and Lorentzian."""
+    eta = np.clip(eta, 0.0, 1.0)
+    return eta * lorentzian_profile(tt, tt_k, fwhm) + (1.0 - eta) * gaussian_profile(tt, tt_k, fwhm)
+
+def get_profile_function(profile_type: str):
+    """Return the appropriate profile function."""
+    profiles = {
+        "Gaussian": lambda tt, tt_k, fwhm, eta=0.5: gaussian_profile(tt, tt_k, fwhm),
+        "Lorentzian": lambda tt, tt_k, fwhm, eta=0.5: lorentzian_profile(tt, tt_k, fwhm),
+        "Pseudo-Voigt": lambda tt, tt_k, fwhm, eta=0.5: pseudo_voigt_profile(tt, tt_k, fwhm, eta),
+    }
+    return profiles.get(profile_type, pseudo_voigt_profile)
+
+# ═══════════════════════════════════════════════════════════════════
 # PROFILE & BACKGROUND FUNCTIONS
 # ═══════════════════════════════════════════════════════════════════
-def pseudo_voigt(tt: np.ndarray, tt_k: float, fwhm: float, eta: float) -> np.ndarray:
-    eta = np.clip(eta, 0.0, 1.0); dx = tt - tt_k
-    sig = fwhm / (2.0*np.sqrt(2.0*np.log(2.0))); G = np.exp(-0.5*(dx/sig)**2) / (sig*np.sqrt(2.0*np.pi))
-    gam = fwhm / 2.0; L = (1.0/np.pi) * gam / (dx**2 + gam**2); return eta*L + (1.0-eta)*G
-
 def caglioti(tt_deg: float, U: float, V: float, W: float) -> float:
     th = np.radians(tt_deg / 2.0); return np.sqrt(max(U*np.tan(th)**2 + V*np.tan(th) + W, 1e-8))
 
@@ -290,16 +312,20 @@ def chebyshev_bg(tt: np.ndarray, coeffs: np.ndarray, tt0: float, tt1: float) -> 
     for c in coeffs[2:]: Tn = 2.0*x*Tc - Tp; bg += c * Tn; Tp, Tc = Tc, Tn
     return bg
 
-def phase_pattern(tt: np.ndarray, ph: Phase, a: float, c: float, scale: float, U: float, V: float, W: float, eta0: float, z_shift: float, wl: float) -> np.ndarray:
+def phase_pattern(tt: np.ndarray, ph: Phase, a: float, c: float, scale: float, U: float, V: float, W: float, eta0: float, z_shift: float, wl: float, profile_type: str = "Pseudo-Voigt") -> np.ndarray:
+    """Generate pattern for a single phase with selectable profile function."""
     ph_r = _make_refined_phase(ph, a, c)
     refls = generate_reflections(ph_r, wl=wl, tt_min=max(float(tt.min())-5.0, 0.1), tt_max=float(tt.max())+5.0)
     avg_biso = np.mean([at.Biso for at in ph.atoms]) if ph.atoms else 0.5
     I = np.zeros_like(tt)
+    profile_func = get_profile_function(profile_type)
+    
     for r in refls:
         tt_k = r["tt"] + z_shift; F2 = _F2(ph_r, r["h"], r["k"], r["l"], wl)
         lp = lp_factor(tt_k); fwhm = caglioti(tt_k, U, V, W)
         stl = np.sin(np.radians(tt_k / 2.0)) / wl; DW = np.exp(-avg_biso * stl**2)
-        I += scale * r["mult"] * F2 * lp * DW * pseudo_voigt(tt, tt_k, fwhm, eta0)
+        # Use the selected profile function
+        I += scale * r["mult"] * F2 * lp * DW * profile_func(tt, tt_k, fwhm, eta0)
     return I
 
 # ═══════════════════════════════════════════════════════════════════
@@ -328,9 +354,10 @@ def r_factors(I_obs, I_calc, w) -> Dict[str, float]:
     return dict(Rwp=float(Rwp), Rp=float(Rp), chi2=float(chi2), Re=float(Re), GOF=float(GOF))
 
 class RietveldRefiner:
-    def __init__(self, tt: np.ndarray, I_obs: np.ndarray, phase_keys: List[str], wavelength: float = 1.54056, n_bg: int = 5):
+    def __init__(self, tt: np.ndarray, I_obs: np.ndarray, phase_keys: List[str], wavelength: float = 1.54056, n_bg: int = 5, profile_type: str = "Pseudo-Voigt"):
         self.tt = tt.astype(float); self.Iobs = np.maximum(I_obs.astype(float), 0.0)
         self.wl = float(wavelength); self.n_bg = int(n_bg)
+        self.profile_type = profile_type
         self.phases = [PHASE_DB[k] for k in phase_keys]; self.n_ph = len(self.phases)
         self.w = 1.0 / np.maximum(self.Iobs, 1.0); self._init_x0()
 
@@ -345,7 +372,7 @@ class RietveldRefiner:
         bg = chebyshev_bg(self.tt, bg_c, self.tt.min(), self.tt.max()); Icalc = bg.copy(); contribs = {}
         for ph, p in zip(self.phases, pp):
             sc, a, c, U, V, W, et = (float(x) for x in p)
-            Iph = phase_pattern(self.tt, ph, a, c, sc, U, V, W, et, z, self.wl); contribs[ph.key] = Iph; Icalc += Iph
+            Iph = phase_pattern(self.tt, ph, a, c, sc, U, V, W, et, z, self.wl, self.profile_type); contribs[ph.key] = Iph; Icalc += Iph
         return Icalc, bg, contribs
 
     def _res(self, v): Icalc, _, _ = self._calc(v); return np.sqrt(self.w) * (self.Iobs - Icalc)
@@ -395,7 +422,7 @@ def make_demo_pattern(noise: float = 0.025, seed: int = 7):
     wf_demo = {"gamma_Co": 0.68, "epsilon_Co": 0.15, "sigma": 0.08, "Cr_bcc": 0.05, "Mo_bcc": 0.04}
     bg_c = np.array([280., -60., 25., -8., 4.]); I = chebyshev_bg(tt, bg_c, tt.min(), tt.max())
     for key, wf in wf_demo.items():
-        ph = PHASE_DB[key]; I += phase_pattern(tt, ph, ph.a, ph.c, wf*7500, 0.025, -0.012, 0.006, 0.45, 0.0, 1.54056)
+        ph = PHASE_DB[key]; I += phase_pattern(tt, ph, ph.a, ph.c, wf*7500, 0.025, -0.012, 0.006, 0.45, 0.0, 1.54056, "Pseudo-Voigt")
     I = np.maximum(I, 0.0); I = rng.poisson(I).astype(float) + rng.normal(0, noise*I.max(), size=I.shape)
     return tt, np.maximum(I, 0.0)
 
@@ -423,7 +450,7 @@ def parse_file_content(content: str, filename: str) -> Tuple[np.ndarray, np.ndar
             if len(parts) >= 2: data.append((float(parts[0]), float(parts[1])))
         except ValueError: continue
     # ✅ FIXED SYNTAX ERROR: Added 'data' to the condition
-    if not data:
+    if not 
         raise ValueError("Cannot parse — expected 2 columns: 2θ and Intensity.")
     arr = np.array(data); tt, I = arr[:, 0], arr[:, 1]
     if tt.max() < 5: tt = np.degrees(tt)
@@ -484,6 +511,10 @@ with st.sidebar:
     else:
         hkl_color = "phase"  # Use phase color
 
+    # 📈 PEAK PROFILE FUNCTION SELECTOR
+    st.markdown('<div class="sh">📈 Peak Profile Function</div>', unsafe_allow_html=True)
+    profile_type = st.selectbox("Select Profile Function", ["Pseudo-Voigt", "Gaussian", "Lorentzian"], index=0, help="Choose the peak shape model for refinement")
+    
     st.markdown('<div class="sh">📁 GitHub Repository Files</div>', unsafe_allow_html=True)
     sample_options = list(AVAILABLE_FILES.keys())
     selected_sample = st.selectbox("Select XRD Sample", options=sample_options, index=0)
@@ -557,7 +588,7 @@ if run and tt_raw is not None and sel_keys:
     if len(tt_c) < 50: st.error("Too few data points — widen the 2θ window.")
     else:
         prog = st.progress(0, "Initialising refiner …"); t0 = time.time()
-        refiner = RietveldRefiner(tt_c, I_c, sel_keys, wavelength, n_bg); refiner.x0[0] = float(zero_seed)
+        refiner = RietveldRefiner(tt_c, I_c, sel_keys, wavelength, n_bg, profile_type); refiner.x0[0] = float(zero_seed)
         prog.progress(15, "Running least-squares optimisation …")
         flags = dict(scale=fl_scale, lattice=fl_lattice, bg=fl_bg, profile=fl_profile, zero=fl_zero)
         results = refiner.refine(flags, max_iter=max_it); elapsed = time.time() - t0
@@ -732,7 +763,7 @@ with tab_params:
         st.dataframe(pd.DataFrame(prof_rows), use_container_width=True, hide_index=True)
         st.markdown('<div class="sh">Global Parameters</div>', unsafe_allow_html=True)
         z_val, bg_c, _ = _unpack(refiner.x0, refiner.n_bg, refiner.n_ph)
-        st.code(f"Zero-shift  : {z_val:+.4f} °\nWavelength  : {wavelength:.5f} Å\nBackground  : {' '.join(f'{float(v):.2f}' for v in bg_c)}  (Chebyshev coeff. 0–{len(bg_c)-1})", language="text")
+        st.code(f"Zero-shift  : {z_val:+.4f} °\nWavelength  : {wavelength:.5f} Å\nBackground  : {' '.join(f'{float(v):.2f}' for v in bg_c)}  (Chebyshev coeff. 0–{len(bg_c)-1})\nProfile Type: {profile_type}", language="text")
         st.markdown('<div class="sh">FWHM vs 2θ</div>', unsafe_allow_html=True)
         tt_plot = np.linspace(float(tt.min()), float(tt.max()), 300); fig_fw = go.Figure()
         for ph_obj in refiner.phases:
@@ -754,6 +785,7 @@ with tab_report:
         md.append(f"**Data points:** {len(tt)}")
         md.append(f"**2θ range:** {tt.min():.2f}° – {tt.max():.2f}°")
         md.append(f"**Computation time:** {elapsed:.2f} s")
+        md.append(f"**Profile Function:** {profile_type}")
         md.append("---")
         md.append("## 1 · Refinement Quality")
         md.append("| Indicator | Value | Guidance |")
@@ -788,7 +820,7 @@ with tab_report:
             md.append(f"| {ph.name} | {lp['scale']:.3e} | {lp['U']:.5f} | {lp['V']:.5f} | {lp['W']:.5f} | {lp['eta']:.3f} |")
         md.append("---")
         md.append("## 5 · Methodology")
-        md.append("- **Profile:** Thompson-Cox-Hastings pseudo-Voigt · Caglioti FWHM (U, V, W, η)")
+        md.append(f"- **Profile:** {profile_type} · Caglioti FWHM (U, V, W, η)")
         md.append(f"- **Background:** Chebyshev polynomial ({n_bg} terms)")
         md.append("- **LP correction:** Graphite monochromator (2θ_mono = 26.6°)")
         md.append("- **Structure factors:** Cromer-Mann + isotropic Debye-Waller")
