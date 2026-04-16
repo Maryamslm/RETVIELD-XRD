@@ -449,8 +449,8 @@ def parse_file_content(content: str, filename: str) -> Tuple[np.ndarray, np.ndar
         try:
             if len(parts) >= 2: data.append((float(parts[0]), float(parts[1])))
         except ValueError: continue
-    # ✅ FIXED SYNTAX ERROR: Added 'data' to the condition
-    if not 
+    # ✅ FIXED SYNTAX ERROR: Added 'data:' to complete the condition
+    if not data:
         raise ValueError("Cannot parse — expected 2 columns: 2θ and Intensity.")
     arr = np.array(data); tt, I = arr[:, 0], arr[:, 1]
     if tt.max() < 5: tt = np.degrees(tt)
