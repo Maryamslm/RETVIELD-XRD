@@ -2,6 +2,7 @@
 ╔══════════════════════════════════════════════════════════════════╗
 ║   Co-Cr Dental Alloy · Full Rietveld XRD Refinement             ║
 ║   Single-file Streamlit Application with GitHub File Selector   ║
+║   Supports .ASC (two-column text) and .XRDML (Panalytical XML)  ║
 ║                                                                  ║
 ║   Usage:  streamlit run app_full.py                              ║
 ║   Deps:   pip install streamlit numpy scipy pandas plotly requests
@@ -45,19 +46,17 @@ GITHUB_REPO = "Maryamslm/RETVIELD-XRD"
 GITHUB_COMMIT = "e9716f8c3d4654fcba8eddde065d0472b1db69e9"
 GITHUB_RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_COMMIT}/samples/"
 
-# Available files in the repository (with both naming conventions)
+# Available files: user-friendly names → possible repository filenames
 AVAILABLE_FILES = {
-    # User-friendly names → actual repository filenames
-    "CH0": ["CH0_1.ASC", "CH0_1.xrdml"],
-    "CH45": ["CH45_2.ASC", "CH45_2.xrdml"],
-    "CNH0": ["CNH0_3.ASC", "CNH0_3.xrdml"],
-    "CNH45": ["CNH45_4.ASC", "CNH45_4.xrdml"],
-    "MEDILOY_powder": ["MEDILOY_powder.xrdml"],
-    # Additional files if they exist in your repo (PH*, PNH*)
+    "CH0": ["CH0_1.ASC", "CH0_1.xrdml", "CH0.ASC", "CH0.xrdml"],
+    "CH45": ["CH45_2.ASC", "CH45_2.xrdml", "CH45.ASC", "CH45.xrdml"],
+    "CNH0": ["CNH0_3.ASC", "CNH0_3.xrdml", "CNH0.ASC", "CNH0.xrdml"],
+    "CNH45": ["CNH45_4.ASC", "CNH45_4.xrdml", "CNH45.ASC", "CNH45.xrdml"],
     "PH0": ["PH0.ASC", "PH0.xrdml", "PH0_1.ASC", "PH0_1.xrdml"],
     "PH45": ["PH45.ASC", "PH45.xrdml", "PH45_1.ASC", "PH45_1.xrdml"],
     "PNH0": ["PNH0.ASC", "PNH0.xrdml", "PNH0_1.ASC", "PNH0_1.xrdml"],
     "PNH45": ["PNH45.ASC", "PNH45.xrdml", "PNH45_1.ASC", "PNH45_1.xrdml"],
+    "MEDILOY_powder": ["MEDILOY_powder.xrdml", "MEDILOY_powder.ASC"],
 }
 
 # ═══════════════════════════════════════════════════════════════════
@@ -658,57 +657,99 @@ def make_demo_pattern(noise: float = 0.025, seed: int = 7):
 
 
 # ═══════════════════════════════════════════════════════════════════
-# FILE PARSER
+# FILE PARSER - SUPPORTS .ASC AND .XRDML
 # ═══════════════════════════════════════════════════════════════════
 def parse_file_content(content: str, filename: str) -> Tuple[np.ndarray, np.ndarray]:
-    """Parse XRD file content (string) and return 2θ, intensity arrays."""
+    """
+    Parse XRD file content and return 2θ, intensity arrays.
+    Supports:
+    - .ASC, .DAT, .TXT, .CSV: Two-column text (2θ, Intensity)
+    - .XRDML: Panalytical XML format
+    """
     name = filename.lower()
     
+    # ── XRDML (Panalytical XML) Parser ──────────────────────────────
     if name.endswith(".xrdml"):
-        root = ET.fromstring(content)
-        cn = root.find(".//{*}counts")
-        if cn is None:
-            raise ValueError("No <counts> node found in .xrdml file.")
-        I = np.array(cn.text.split(), dtype=float)
-        s2t = e2t = None
-        for pos in root.findall(".//{*}positions"):
-            if "2Theta" in pos.get("axis", ""):
-                try:
-                    s2t = float(pos.find("{*}startPosition").text)
-                    e2t = float(pos.find("{*}endPosition").text)
-                except Exception:
-                    pass
-        tt = np.linspace(s2t or 10.0, e2t or 100.0, len(I))
-        return tt, I
-
-    # Parse two-column text format (ASC, DAT, TXT, CSV)
+        try:
+            root = ET.fromstring(content)
+            # Find counts data
+            counts_elem = root.find(".//{*}counts")
+            if counts_elem is None:
+                # Try without namespace
+                counts_elem = root.find(".//counts")
+            if counts_elem is None:
+                raise ValueError("No <counts> node found in .xrdml file.")
+            
+            # Parse intensity values
+            I = np.array(counts_elem.text.split(), dtype=float)
+            
+            # Find 2θ positions
+            start_pos = end_pos = None
+            for pos_elem in root.findall(".//{*}positions"):
+                if "2Theta" in pos_elem.get("axis", ""):
+                    try:
+                        start_pos = float(pos_elem.find("{*}startPosition").text)
+                        end_pos = float(pos_elem.find("{*}endPosition").text)
+                    except (AttributeError, ValueError):
+                        pass
+            
+            # Generate 2θ array
+            if start_pos is not None and end_pos is not None:
+                tt = np.linspace(start_pos, end_pos, len(I))
+            else:
+                # Fallback: assume standard range
+                tt = np.linspace(10.0, 100.0, len(I))
+            
+            return tt, I
+            
+        except ET.ParseError as e:
+            raise ValueError(f"XML parsing error in .xrdml file: {e}")
+    
+    # ── Two-column text format parser (.ASC, .DAT, .TXT, .CSV) ─────
     lines = [ln.strip() for ln in content.splitlines()
-             if ln.strip() and ln.strip()[0] not in "#!/'"]
+             if ln.strip() and ln.strip()[0] not in "#!/'\";"]
+    
     data = []
     for ln in lines:
+        # Handle comma or space/tab separated
         parts = ln.replace(",", " ").split()
         try:
             if len(parts) >= 2:
-                data.append((float(parts[0]), float(parts[1])))
+                two_theta = float(parts[0])
+                intensity = float(parts[1])
+                data.append((two_theta, intensity))
         except ValueError:
-            pass
+            continue  # Skip malformed lines
+    
     if not data:
-        raise ValueError("Cannot parse — expected 2 columns: 2θ and Intensity.")
+        raise ValueError("Cannot parse file — expected 2 columns: 2θ and Intensity.")
+    
     arr = np.array(data)
     tt, I = arr[:, 0], arr[:, 1]
-    if tt.max() < 5:  # Convert radians to degrees if needed
+    
+    # Convert radians to degrees if values are very small
+    if tt.max() < 5:
         tt = np.degrees(tt)
+    
+    # Sort by 2θ if needed
+    if not np.all(tt[:-1] <= tt[1:]):
+        sort_idx = np.argsort(tt)
+        tt, I = tt[sort_idx], I[sort_idx]
+    
     return tt, I
 
 
 def fetch_github_xrd(sample_name: str, file_ext: str = ".ASC") -> Tuple[np.ndarray, np.ndarray, str]:
-    """Fetch XRD data from GitHub repository. Returns tt, I, and actual filename used."""
+    """
+    Fetch XRD data from GitHub repository.
+    Returns: (two_theta_array, intensity_array, actual_filename_used)
+    """
     if sample_name not in AVAILABLE_FILES:
         raise ValueError(f"Sample '{sample_name}' not found in available files.")
     
     possible_files = AVAILABLE_FILES[sample_name]
     
-    # Try each possible filename with the preferred extension first
+    # Try files with preferred extension first
     for filename in possible_files:
         if filename.endswith(file_ext):
             url = GITHUB_RAW_BASE + filename
@@ -718,8 +759,10 @@ def fetch_github_xrd(sample_name: str, file_ext: str = ".ASC") -> Tuple[np.ndarr
                 content = response.text
                 tt, I = parse_file_content(content, filename)
                 return tt, I, filename
-            except requests.RequestException:
-                continue  # Try next file
+            except requests.RequestException as e:
+                continue
+            except Exception as e:
+                continue
     
     # If preferred extension fails, try all possible files
     for filename in possible_files:
@@ -732,9 +775,11 @@ def fetch_github_xrd(sample_name: str, file_ext: str = ".ASC") -> Tuple[np.ndarr
             return tt, I, filename
         except requests.RequestException:
             continue
+        except Exception:
+            continue
     
     raise ValueError(f"Could not fetch any file for sample '{sample_name}'. "
-                    f"Tried: {possible_files}")
+                    f"Tried extensions: .ASC, .xrdml with filenames: {possible_files}")
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -749,7 +794,7 @@ def q_color(rwp: float) -> str:
 # ═══════════════════════════════════════════════════════════════════
 # SESSION STATE
 # ═══════════════════════════════════════════════════════════════════
-for _k in ("results", "refiner", "tt", "Iobs", "elapsed", "selected_sample"):
+for _k in ("results", "refiner", "tt", "Iobs", "elapsed", "selected_sample", "source_info"):
     if _k not in st.session_state:
         st.session_state[_k] = None
 
@@ -760,10 +805,9 @@ for _k in ("results", "refiner", "tt", "Iobs", "elapsed", "selected_sample"):
 with st.sidebar:
     st.markdown("## ⚙️ Setup")
 
-    st.markdown('<div class="sh">Data Source</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sh">📁 GitHub Repository Files</div>', unsafe_allow_html=True)
     
-    # ── GitHub File Dropdown Selector ──
-    st.markdown("### 📁 GitHub Repository Files")
+    # Dropdown selector for samples
     sample_options = list(AVAILABLE_FILES.keys())
     selected_sample = st.selectbox(
         "Select XRD Sample",
@@ -778,26 +822,27 @@ with st.sidebar:
         options=[".ASC", ".xrdml"],
         index=0,
         horizontal=True,
-        help="ASC = two-column text; xrdml = Panalytical XML"
+        help=".ASC = two-column text format | .XRDML = Panalytical XML"
     )
     
-    fetch_btn = st.button("🔄 Load Selected File from GitHub", type="primary")
+    fetch_btn = st.button("🔄 Load Selected File from GitHub", type="primary", use_container_width=True)
     
     tt_raw = I_raw = None
     source_info = ""
     
     if fetch_btn:
-        with st.spinner(f"Fetching {selected_sample}{file_ext} from GitHub..."):
+        with st.spinner(f"Fetching {selected_sample} from GitHub..."):
             try:
                 tt_raw, I_raw, actual_file = fetch_github_xrd(selected_sample, file_ext)
                 source_info = f"✓ Loaded: {actual_file} ({len(tt_raw)} pts, {tt_raw.min():.1f}°–{tt_raw.max():.1f}°)"
                 st.success(source_info)
                 st.session_state.selected_sample = selected_sample
+                st.session_state.source_info = source_info
             except Exception as e:
                 st.error(f"❌ Error: {str(e)}")
                 st.info("💡 Try switching file format or check your internet connection.")
     
-    # Alternative: Demo or Upload
+    # Alternative data sources
     with st.expander("🔁 Alternative: Demo Pattern or Local Upload", expanded=False):
         src = st.radio("", ["Demo pattern (synthetic)", "Upload my XRD file"],
                        label_visibility="collapsed", key="alt_src")
@@ -805,6 +850,7 @@ with st.sidebar:
         if src.startswith("Demo"):
             tt_raw, I_raw = make_demo_pattern()
             st.info("Synthetic SLM Co-Cr-Mo · Cu Kα₁")
+            source_info = "Demo pattern loaded"
         else:
             up = st.file_uploader(
                 "Drag & drop XRD file",
@@ -815,11 +861,12 @@ with st.sidebar:
                 try:
                     content = up.read().decode("utf-8", errors="replace")
                     tt_raw, I_raw = parse_file_content(content, up.name)
-                    st.success(f"✓ {len(tt_raw)} pts · {tt_raw.min():.1f}° – {tt_raw.max():.1f}°")
+                    source_info = f"✓ {up.name}: {len(tt_raw)} pts · {tt_raw.min():.1f}° – {tt_raw.max():.1f}°"
+                    st.success(source_info)
                 except Exception as e:
                     st.error(str(e))
 
-    st.markdown('<div class="sh">Instrument</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sh">⚙️ Instrument</div>', unsafe_allow_html=True)
     WL_OPTIONS = {
         "Cu Kα₁  (1.54056 Å)": 1.54056,
         "Cu Kα   (1.54184 Å)": 1.54184,
@@ -831,10 +878,10 @@ with st.sidebar:
     wavelength = WL_OPTIONS[wl_label]
     zero_seed  = st.slider("Zero-shift seed (°)", -1.0, 1.0, 0.0, 0.01)
 
-    st.markdown('<div class="sh">2θ Window</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sh">📐 2θ Window</div>', unsafe_allow_html=True)
     tt_lo, tt_hi = st.slider("", 10.0, 120.0, (15.0, 95.0), 0.5)
 
-    st.markdown('<div class="sh">Phase Selection</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sh">🧊 Phase Selection</div>', unsafe_allow_html=True)
     sel_keys: List[str] = []
     for grp, keys, exp in [
         ("Primary phases",   PRIMARY_KEYS,   True),
@@ -853,7 +900,7 @@ with st.sidebar:
     if not sel_keys:
         st.warning("⚠️ Select at least one phase.")
 
-    st.markdown('<div class="sh">Refinement Flags</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sh">🔧 Refinement Flags</div>', unsafe_allow_html=True)
     c1, c2 = st.columns(2)
     fl_scale   = c1.checkbox("Scale",      value=True)
     fl_lattice = c2.checkbox("Lattice",    value=True)
@@ -887,8 +934,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Show current sample info
-if st.session_state.selected_sample and source_info:
-    st.caption(f"📊 Current data: **{st.session_state.selected_sample}** — {source_info}")
+if st.session_state.selected_sample and st.session_state.source_info:
+    st.caption(f"📊 Current sample: **{st.session_state.selected_sample}** — {st.session_state.source_info}")
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -936,12 +983,9 @@ tab_fit, tab_phase, tab_peaks, tab_params, tab_report, tab_about = st.tabs([
     "ℹ️ About",
 ])
 
-# [Rest of the tab content remains identical to original - truncated for brevity]
-# The pattern fit, phase analysis, peak list, parameters, report, and about tabs
-# are identical to the original code. They use st.session_state["results"] etc.
 
 # ───────────────────────────────────────────────────────────────────
-# TAB 1 · PATTERN FIT (abbreviated - full code same as original)
+# TAB 1 · PATTERN FIT
 # ───────────────────────────────────────────────────────────────────
 with tab_fit:
     if st.session_state["results"] is None:
@@ -959,8 +1003,6 @@ with tab_fit:
             st.plotly_chart(fig, use_container_width=True)
         st.info("👈 Select a file from the dropdown above and press **▶ Run Rietveld Refinement**.")
     else:
-        # Full plotting code identical to original...
-        # (Include all the original tab_fit content here)
         r       = st.session_state["results"]
         refiner = st.session_state["refiner"]
         tt      = st.session_state["tt"]
@@ -968,6 +1010,8 @@ with tab_fit:
         elapsed = st.session_state["elapsed"]
         z_shift = float(r.get("z_shift", 0.0))
         _, _, pp_vec = _unpack(refiner.x0, refiner.n_bg, refiner.n_ph)
+
+        # Metric cards
         rwp = r["Rwp"]; rp = r["Rp"]; gof = r["GOF"]; chi2 = r["chi2"]
         qc  = q_color(rwp)
         st.markdown(f"""
@@ -987,67 +1031,475 @@ with tab_fit:
             <div class="val">{elapsed:.1f}</div><div class="sub">s</div></div>
         </div>
         """, unsafe_allow_html=True)
-        # ... continue with full plotting code from original
-        # For brevity, I'll note that all original tab content should be included here
-        st.info("📊 Full Rietveld plot would render here with observed/calculated patterns, phase contributions, and difference curve.")
+
+        # Rietveld plot
+        fig = make_subplots(
+            rows=2, cols=1, row_heights=[0.78, 0.22],
+            shared_xaxes=True, vertical_spacing=0.02,
+        )
+
+        fig.add_trace(go.Scatter(
+            x=tt, y=Iobs, mode="lines", name="I_obs (exp)",
+            line=dict(color="#94a3b8", width=1.3),
+        ), row=1, col=1)
+
+        fig.add_trace(go.Scatter(
+            x=tt, y=r["Ibg"], mode="lines", name="Background",
+            line=dict(color="#334155", width=1, dash="dot"),
+            fill="tozeroy", fillcolor="rgba(51,65,85,0.12)",
+        ), row=1, col=1)
+
+        for key, Iph in r["contribs"].items():
+            ph  = PHASE_DB[key]
+            wf  = r["wf"].get(key, 0) * 100
+            fig.add_trace(go.Scatter(
+                x=tt, y=Iph + r["Ibg"], mode="lines",
+                name=f"{ph.name}  ({wf:.1f}%)",
+                line=dict(color=ph.color, width=1.6, dash="dash"),
+                opacity=0.8,
+            ), row=1, col=1)
+
+        fig.add_trace(go.Scatter(
+            x=tt, y=r["Icalc"], mode="lines", name="I_calc",
+            line=dict(color="#fbbf24", width=2.2),
+        ), row=1, col=1)
+
+        # hkl tick marks
+        y_tick = float(Iobs.min()) - 0.05*(float(Iobs.max()) - float(Iobs.min()))
+        for i, ph_obj in enumerate(refiner.phases):
+            a_ref = float(pp_vec[i][1])
+            c_ref = float(pp_vec[i][2])
+            ph_ref = _make_refined_phase(ph_obj, a_ref, c_ref)
+            pks = generate_reflections(
+                ph_ref, wl=wavelength,
+                tt_min=float(tt.min()), tt_max=float(tt.max()),
+            )
+            fig.add_trace(go.Scatter(
+                x=[p["tt"] + z_shift for p in pks],
+                y=[y_tick] * len(pks),
+                mode="markers",
+                marker=dict(symbol="line-ns", size=11, color=ph_obj.color,
+                            line=dict(width=2, color=ph_obj.color)),
+                name=f"{ph_obj.name} hkl",
+                showlegend=False,
+            ), row=1, col=1)
+
+        fig.add_trace(go.Scatter(
+            x=tt, y=r["diff"], mode="lines", name="Δ obs−calc",
+            line=dict(color="#818cf8", width=1),
+            fill="tozeroy", fillcolor="rgba(129,140,248,0.12)",
+        ), row=2, col=1)
+        fig.add_hline(y=0, line=dict(color="#334155", width=1, dash="dash"), row=2, col=1)
+
+        fig.update_layout(
+            template="plotly_dark",
+            paper_bgcolor="#030712", plot_bgcolor="#030712",
+            height=650,
+            legend=dict(bgcolor="#080e1a", bordercolor="#1e293b",
+                        font=dict(size=11), x=1.01, y=1),
+            margin=dict(l=65, r=210, t=15, b=55),
+            font=dict(family="IBM Plex Sans"),
+        )
+        fig.update_xaxes(title_text="2θ (°)", row=2, col=1,
+                         gridcolor="#0f172a", zerolinecolor="#0f172a")
+        fig.update_yaxes(title_text="Intensity (counts)", row=1, col=1,
+                         gridcolor="#0f172a", zerolinecolor="#0f172a")
+        fig.update_yaxes(title_text="Δ", row=2, col=1,
+                         gridcolor="#0f172a", zerolinecolor="#0f172a")
+        st.plotly_chart(fig, use_container_width=True)
+
+        df_pat = pd.DataFrame({
+            "two_theta":    tt,
+            "I_obs":        Iobs,
+            "I_calc":       r["Icalc"],
+            "I_background": r["Ibg"],
+            "difference":   r["diff"],
+            **{f"I_{k}": v for k, v in r["contribs"].items()},
+        })
         st.download_button("⬇ Download pattern CSV",
-                           data=pd.DataFrame({"two_theta": tt, "I_obs": Iobs}).to_csv(index=False),
+                           data=df_pat.to_csv(index=False),
                            file_name="rietveld_pattern.csv", mime="text/csv")
 
+
 # ───────────────────────────────────────────────────────────────────
-# TAB 2-6: Include all original tab content here
-# For production use, copy the complete tab_phase, tab_peaks, tab_params, 
-# tab_report, and tab_about sections from your original code.
+# TAB 2 · PHASE ANALYSIS
 # ───────────────────────────────────────────────────────────────────
 with tab_phase:
     if st.session_state["results"] is None:
         st.info("Run refinement first.")
     else:
-        st.info("⚖️ Phase analysis results would display here with pie/bar charts and weight fractions.")
+        r        = st.session_state["results"]
+        wf_dict  = r["wf"]
+        ph_names = [PHASE_DB[k].name  for k in wf_dict]
+        wf_pct   = [wf_dict[k]*100    for k in wf_dict]
+        ph_cols  = [PHASE_DB[k].color for k in wf_dict]
 
+        c1, c2 = st.columns(2)
+
+        with c1:
+            fig_pie = go.Figure(go.Pie(
+                labels=ph_names, values=wf_pct, hole=0.58,
+                marker=dict(colors=ph_cols, line=dict(color="#030712", width=2.5)),
+                textinfo="label+percent",
+                textfont=dict(size=11.5, family="IBM Plex Sans"),
+                hovertemplate="<b>%{label}</b><br>%{value:.2f} wt%<extra></extra>",
+            ))
+            fig_pie.add_annotation(
+                text="Weight<br>Fraction", x=0.5, y=0.5,
+                font=dict(size=12, color="#64748b"), showarrow=False,
+            )
+            fig_pie.update_layout(
+                template="plotly_dark", paper_bgcolor="#030712",
+                showlegend=False, height=360,
+                margin=dict(l=10,r=10,t=30,b=10),
+                title=dict(text="Phase Composition", font=dict(size=13, color="#64748b")),
+            )
+            st.plotly_chart(fig_pie, use_container_width=True)
+
+        with c2:
+            idx = list(np.argsort(wf_pct)[::-1])
+            fig_bar = go.Figure(go.Bar(
+                x=[wf_pct[i] for i in idx],
+                y=[ph_names[i] for i in idx],
+                orientation="h",
+                marker=dict(color=[ph_cols[i] for i in idx]),
+                text=[f"{wf_pct[i]:.2f} %" for i in idx],
+                textposition="inside",
+                insidetextfont=dict(color="white", size=11, family="IBM Plex Mono"),
+            ))
+            fig_bar.update_layout(
+                template="plotly_dark",
+                paper_bgcolor="#030712", plot_bgcolor="#030712",
+                xaxis_title="wt %", height=360,
+                margin=dict(l=10,r=10,t=30,b=40),
+                title=dict(text="Phase Distribution", font=dict(size=13, color="#64748b")),
+                yaxis=dict(gridcolor="#0f172a"),
+                xaxis=dict(gridcolor="#0f172a", range=[0, max(wf_pct)*1.15]),
+            )
+            st.plotly_chart(fig_bar, use_container_width=True)
+
+        st.markdown('<div class="sh">Phase Detail</div>', unsafe_allow_html=True)
+        lat  = r["lat"]
+        rows = []
+        for k, wf in wf_dict.items():
+            ph = PHASE_DB[k]
+            lp = lat.get(k, {})
+            rows.append({
+                "Phase":         ph.name,
+                "Formula":       ph.formula,
+                "PDF Card":      ph.pdf_card,
+                "System":        ph.crystal_system.title(),
+                "S.G.":          ph.space_group,
+                "wt %":          f"{wf*100:.2f}",
+                "a ref (Å)":     f"{lp.get('a_ref', ph.a):.4f}",
+                "c ref (Å)":     f"{lp.get('c_ref', ph.c):.4f}" if ph.c != ph.a else "—",
+                "Group":         ph.group,
+            })
+        df_ph = pd.DataFrame(rows)
+        st.dataframe(df_ph, use_container_width=True, hide_index=True)
+
+        with st.expander("🧪 Microstructural Interpretation", expanded=True):
+            wm = {k: wf_dict.get(k, 0)*100 for k in PHASE_DB}
+            msgs = []
+            if wm["gamma_Co"] > 50:
+                msgs.append(("✅","γ-Co (FCC)",f"{wm['gamma_Co']:.1f} wt%",
+                    "Dominant austenitic matrix — typical of rapid-solidification SLM. "
+                    "Good biocompatibility and ductility for dental prostheses."))
+            if wm["epsilon_Co"] > 5:
+                msgs.append(("⚠️","ε-Co (HCP)",f"{wm['epsilon_Co']:.1f} wt%",
+                    "Elevated HCP fraction — martensitic transformation driven by residual stress "
+                    "or strain. Monitor fatigue performance."))
+            if wm["sigma"] > 3:
+                msgs.append(("🔴","σ-phase",f"{wm['sigma']:.1f} wt%",
+                    "Brittle intermetallic — risk to ductility and fracture toughness. "
+                    "Consider solution anneal at >1100 °C + water quench."))
+            if wm["Cr_bcc"] > 2:
+                msgs.append(("🔵","Cr (BCC)",f"{wm['Cr_bcc']:.1f} wt%",
+                    "Free chromium — may indicate incomplete alloying or Cr-rich segregation."))
+            if wm["Mo_bcc"] > 1:
+                msgs.append(("🟣","Mo (BCC)",f"{wm['Mo_bcc']:.1f} wt%",
+                    "Segregated molybdenum — inter-dendritic artefact; "
+                    "homogenisation anneal at 1150 °C / 1 h recommended."))
+            if wm.get("Cr2O3",0) > 0.5 or wm.get("CoCr2O4",0) > 0.5:
+                msgs.append(("🟠","Oxides",
+                    f"Cr₂O₃={wm.get('Cr2O3',0):.1f}%  CoCr₂O₄={wm.get('CoCr2O4',0):.1f}%",
+                    "Surface/internal oxide detected — check SLM atmosphere and powder storage."))
+            if not msgs:
+                msgs.append(("ℹ️","No dominant phases","—",
+                             "Check phase selection and 2θ range."))
+            for icon, name, pct, msg in msgs:
+                st.markdown(f"""
+                <div style="background:#080e1a;border:1px solid #1e293b;border-radius:10px;
+                            padding:14px 18px;margin-bottom:10px;">
+                  <div style="font-weight:700;font-size:.95rem;margin-bottom:4px;">
+                    {icon} &nbsp;{name} &nbsp;
+                    <span style="font-family:'IBM Plex Mono';font-size:.82rem;color:#64748b;">{pct}</span>
+                  </div>
+                  <div style="color:#94a3b8;font-size:.85rem;line-height:1.55;">{msg}</div>
+                </div>""", unsafe_allow_html=True)
+
+        st.download_button("⬇ Download phase table (.csv)",
+                           data=df_ph.to_csv(index=False),
+                           file_name="phase_analysis.csv", mime="text/csv")
+
+
+# ───────────────────────────────────────────────────────────────────
+# TAB 3 · PEAK LIST
+# ───────────────────────────────────────────────────────────────────
 with tab_peaks:
     if st.session_state["refiner"] is None:
         st.info("Run refinement first.")
     else:
-        st.info("📋 Peak list with hkl indices would display here.")
+        refiner = st.session_state["refiner"]
+        tt      = st.session_state["tt"]
+        r       = st.session_state["results"]
+        z_shift = float(r.get("z_shift", 0.0))
+        _, _, pp_vec = _unpack(refiner.x0, refiner.n_bg, refiner.n_ph)
 
+        show = st.multiselect(
+            "Phases to display",
+            options=[ph.key for ph in refiner.phases],
+            default=[ph.key for ph in refiner.phases],
+            format_func=lambda k: PHASE_DB[k].name,
+        )
+
+        rows = []
+        for i, ph_obj in enumerate(refiner.phases):
+            if ph_obj.key not in show:
+                continue
+            a_ref  = float(pp_vec[i][1])
+            c_ref  = float(pp_vec[i][2])
+            ph_ref = _make_refined_phase(ph_obj, a_ref, c_ref)
+            for ref in generate_reflections(
+                ph_ref, wl=wavelength,
+                tt_min=float(tt.min()), tt_max=float(tt.max()),
+            ):
+                h, k, l = ref["h"], ref["k"], ref["l"]
+                rows.append({
+                    "Phase":   ph_obj.name,
+                    "hkl":     f"({h} {k} {l})",
+                    "d (Å)":   f"{ref['d']:.4f}",
+                    "2θ (°)":  f"{ref['tt'] + z_shift:.3f}",
+                    "Mult.":   ref["mult"],
+                    "Group":   ph_obj.group,
+                })
+
+        if rows:
+            df_pk = (pd.DataFrame(rows)
+                     .sort_values("2θ (°)")
+                     .reset_index(drop=True))
+            st.dataframe(df_pk, use_container_width=True, hide_index=True, height=500)
+            st.download_button("⬇ Download peak list (.csv)",
+                               data=df_pk.to_csv(index=False),
+                               file_name="peak_list.csv", mime="text/csv")
+        else:
+            st.warning("No peaks found for selected phases in this 2θ range.")
+
+
+# ───────────────────────────────────────────────────────────────────
+# TAB 4 · REFINED PARAMETERS
+# ───────────────────────────────────────────────────────────────────
 with tab_params:
     if st.session_state["results"] is None:
         st.info("Run refinement first.")
     else:
-        st.info("🔧 Refined lattice and profile parameters would display here.")
+        r       = st.session_state["results"]
+        refiner = st.session_state["refiner"]
+        lat     = r["lat"]
+        tt      = st.session_state["tt"]
 
+        st.markdown('<div class="sh">Lattice Parameters</div>', unsafe_allow_html=True)
+        lp_rows = []
+        for ph_obj in refiner.phases:
+            lp = lat.get(ph_obj.key, {})
+            lp_rows.append({
+                "Phase":      ph_obj.name,
+                "System":     ph_obj.crystal_system.title(),
+                "S.G.":       ph_obj.space_group,
+                "a_init (Å)": f"{lp.get('a_init', ph_obj.a):.4f}",
+                "a_ref (Å)":  f"{lp.get('a_ref',  ph_obj.a):.4f}",
+                "Δa (Å)":     f"{lp.get('da', 0):+.4f}",
+                "c_init (Å)": f"{lp.get('c_init', ph_obj.c):.4f}" if ph_obj.c != ph_obj.a else "—",
+                "c_ref (Å)":  f"{lp.get('c_ref',  ph_obj.c):.4f}" if ph_obj.c != ph_obj.a else "—",
+                "Δc (Å)":     f"{lp.get('dc', 0):+.4f}"           if ph_obj.c != ph_obj.a else "—",
+            })
+        st.dataframe(pd.DataFrame(lp_rows), use_container_width=True, hide_index=True)
+
+        st.markdown('<div class="sh">Profile Parameters (U, V, W, η)</div>',
+                    unsafe_allow_html=True)
+        prof_rows = []
+        for ph_obj in refiner.phases:
+            lp = lat.get(ph_obj.key, {})
+            prof_rows.append({
+                "Phase":      ph_obj.name,
+                "Scale":      f"{lp.get('scale', 0):.4e}",
+                "U":          f"{lp.get('U', 0):.5f}",
+                "V":          f"{lp.get('V', 0):.5f}",
+                "W":          f"{lp.get('W', 0):.5f}",
+                "η (mixing)": f"{lp.get('eta', 0.5):.3f}",
+            })
+        st.dataframe(pd.DataFrame(prof_rows), use_container_width=True, hide_index=True)
+
+        st.markdown('<div class="sh">Global Parameters</div>', unsafe_allow_html=True)
+        z_val, bg_c, _ = _unpack(refiner.x0, refiner.n_bg, refiner.n_ph)
+        st.code(
+            f"Zero-shift  : {z_val:+.4f} °\n"
+            f"Wavelength  : {wavelength:.5f} Å\n"
+            f"Background  : {' '.join(f'{float(v):.2f}' for v in bg_c)}"
+            f"  (Chebyshev coeff. 0–{len(bg_c)-1})",
+            language="text",
+        )
+
+        # FWHM vs 2θ
+        st.markdown('<div class="sh">FWHM vs 2θ</div>', unsafe_allow_html=True)
+        tt_plot = np.linspace(float(tt.min()), float(tt.max()), 300)
+        fig_fw  = go.Figure()
+        for ph_obj in refiner.phases:
+            lp = lat.get(ph_obj.key, {})
+            U, V, W = lp.get("U",.02), lp.get("V",-.01), lp.get("W",.005)
+            fw = [caglioti(t, U, V, W) for t in tt_plot]
+            fig_fw.add_trace(go.Scatter(
+                x=tt_plot, y=fw, mode="lines",
+                name=ph_obj.name, line=dict(color=ph_obj.color, width=2),
+            ))
+        fig_fw.update_layout(
+            template="plotly_dark",
+            paper_bgcolor="#030712", plot_bgcolor="#030712",
+            xaxis_title="2θ (°)", yaxis_title="FWHM (°)",
+            height=270, margin=dict(l=60,r=20,t=10,b=50),
+            legend=dict(bgcolor="#080e1a", bordercolor="#1e293b", font=dict(size=10)),
+            xaxis=dict(gridcolor="#0f172a"),
+            yaxis=dict(gridcolor="#0f172a"),
+        )
+        st.plotly_chart(fig_fw, use_container_width=True)
+
+
+# ───────────────────────────────────────────────────────────────────
+# TAB 5 · REPORT
+# ───────────────────────────────────────────────────────────────────
 with tab_report:
     if st.session_state["results"] is None:
         st.info("Run refinement first.")
     else:
-        st.info("📄 Full markdown report would generate here.")
+        r       = st.session_state["results"]
+        refiner = st.session_state["refiner"]
+        elapsed = st.session_state["elapsed"]
+        tt      = st.session_state["tt"]
 
+        md = f"""# Rietveld Refinement Report
+## Co-Cr Dental Alloy · XRD Phase Analysis
+
+**Date:** {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')}
+**Radiation:** {wl_label}  ·  λ = {wavelength:.5f} Å
+**Data points:** {len(tt)}
+**2θ range:** {tt.min():.2f}° – {tt.max():.2f}°
+**Computation time:** {elapsed:.2f} s
+
+---
+
+## 1 · Refinement Quality
+
+| Indicator | Value | Guidance |
+|-----------|-------|----------|
+| R_wp | **{r['Rwp']*100:.2f} %** | < 10 % acceptable; < 5 % excellent |
+| R_p  | **{r['Rp']*100:.2f} %**  | — |
+| χ²   | **{r['chi2']:.4f}** | — |
+| GOF  | **{r['GOF']:.4f}** | ≈ 1 ideal |
+
+---
+
+## 2 · Phase Weight Fractions (Hill-Howard)
+
+| Phase | Formula | S.G. | wt % |
+|-------|---------|------|------|
+"""
+        for k, wf in r["wf"].items():
+            ph = PHASE_DB[k]
+            md += f"| {ph.name} | {ph.formula} | {ph.space_group} | **{wf*100:.2f}** |\n"
+
+        md += "\n---\n\n## 3 · Refined Lattice Parameters\n\n"
+        md += "| Phase | a_init (Å) | a_ref (Å) | Δa | c_init (Å) | c_ref (Å) | Δc |\n"
+        md += "|-------|-----------|-----------|-----|-----------|-----------|----|\n"
+        for k, lp in r["lat"].items():
+            ph = PHASE_DB[k]
+            if ph.c != ph.a:
+                md += (f"| {ph.name} | {lp['a_init']:.4f} | {lp['a_ref']:.4f} | "
+                       f"{lp['da']:+.4f} | {lp['c_init']:.4f} | {lp['c_ref']:.4f} | "
+                       f"{lp['dc']:+.4f} |\n")
+            else:
+                md += (f"| {ph.name} | {lp['a_init']:.4f} | {lp['a_ref']:.4f} | "
+                       f"{lp['da']:+.4f} | — | — | — |\n")
+
+        md += "\n---\n\n## 4 · Profile Parameters\n\n"
+        md += "| Phase | Scale | U | V | W | η |\n"
+        md += "|-------|-------|---|---|---|---|\n"
+        for k, lp in r["lat"].items():
+            ph = PHASE_DB[k]
+            md += (f"| {ph.name} | {lp['scale']:.3e} | {lp['U']:.5f} "
+                   f"| {lp['V']:.5f} | {lp['W']:.5f} | {lp['eta']:.3f} |\n")
+
+        md += f"""
+---
+
+## 5 · Methodology
+
+- **Profile:** Thompson-Cox-Hastings pseudo-Voigt · Caglioti FWHM (U, V, W, η)
+- **Background:** Chebyshev polynomial ({n_bg} terms)
+- **LP correction:** Graphite monochromator (2θ_mono = 26.6°)
+- **Structure factors:** Cromer-Mann + isotropic Debye-Waller
+- **Weight fractions:** Hill-Howard formula
+- **Optimiser:** scipy.optimize.least_squares (TRF / Levenberg-Marquardt · {max_it} iter.)
+
+---
+
+## 6 · References
+
+1. Rietveld (1969) *J. Appl. Cryst.* **2**, 65–71
+2. Hill & Howard (1987) *J. Appl. Cryst.* **20**, 467–474
+3. Thompson et al. (1987) *J. Appl. Cryst.* **20**, 79–83
+4. Takaichi et al. (2013) *Acta Biomaterialia* **9**, 7901–7910
+5. ISO 22674:2016 · ASTM F75-18
+"""
+        st.markdown(md)
+        st.download_button("⬇ Download Report (.md)",
+                           data=md, file_name="rietveld_report.md",
+                           mime="text/markdown")
+
+
+# ───────────────────────────────────────────────────────────────────
+# TAB 6 · ABOUT
+# ───────────────────────────────────────────────────────────────────
 with tab_about:
     st.markdown("""
 ## About
 
 Full-profile **Rietveld refinement** for X-ray diffraction patterns from
-**3D-printed (SLM/DMLS) Co-Cr dental alloys** — entirely in the browser.
+**3D-printed (SLM/DMLS) Co-Cr dental alloys** — entirely in the browser,
+no crystallography software required.
 
-### GitHub Integration ✨
-- Dropdown selector for samples: `CH0`, `CH45`, `CNH0`, `CNH45`, `PH0`, `PH45`, `PNH0`, `PNH45`
-- Auto-fetches `.ASC` or `.xrdml` files from: `Maryamslm/RETVIELD-XRD`
-- Fallback to local upload or synthetic demo pattern
+---
 
-### Phase Library
-| Phase | Formula | Space Group |
-|-------|---------|-------------|
-| γ-Co (FCC) | Co | Fm-3m |
-| ε-Co (HCP) | Co | P6₃/mmc |
-| σ-phase | CoCr | P4₂/mnm |
-| Cr (BCC) | Cr | Im-3m |
-| Mo (BCC) | Mo | Im-3m |
-| Co₃Mo | Co₃Mo | P6₃/mmc |
-| Cr₂O₃ | Cr₂O₃ | R-3m |
-| CoCr₂O₄ | CoCr₂O₄ | Fm-3m |
+### ✨ GitHub Integration
 
-### Install & Run
-```bash
-pip install streamlit numpy scipy pandas plotly requests
-streamlit run app_full.py
+- **Dropdown selector** for samples: `CH0`, `CH45`, `CNH0`, `CNH45`, `PH0`, `PH45`, `PNH0`, `PNH45`
+- **Auto-fetches** `.ASC` or `.XRDML` files from: `Maryamslm/RETVIELD-XRD`
+- **Fallback** to local upload or synthetic demo pattern
+
+---
+
+### 📚 Phase Library
+
+| Phase | Formula | Space Group | Group |
+|-------|---------|-------------|-------|
+| γ-Co (FCC) | Co | Fm-3m | Primary |
+| ε-Co (HCP) | Co | P6₃/mmc | Primary |
+| σ-phase | CoCr | P4₂/mnm | Secondary |
+| Cr (BCC) | Cr | Im-3m | Secondary |
+| Mo (BCC) | Mo | Im-3m | Secondary |
+| Co₃Mo | Co₃Mo | P6₃/mmc | Secondary |
+| Cr₂O₃ | Cr₂O₃ | R-3m | Oxide |
+| CoCr₂O₄ | CoCr₂O₄ | Fm-3m | Oxide |
+
+---
+
+### 🔬 Algorithm
