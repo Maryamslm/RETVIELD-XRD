@@ -22,11 +22,12 @@ import streamlit as st
 from plotly.subplots import make_subplots
 from scipy.optimize import least_squares
 from scipy.signal import savgol_filter
-import matplotlib.pyplot as plt
 import matplotlib
+import matplotlib.pyplot as plt
 from io import BytesIO
 
-matplotlib.use('Agg')  # Non-interactive backend for Streamlit
+# Set non-interactive backend for matplotlib to avoid GUI warnings on servers
+matplotlib.use('Agg')
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 # ═══════════════════════════════════════════════════════════════════
@@ -323,33 +324,53 @@ def make_demo_pattern(noise=0.025, seed=7):
 def parse_file_content(content, filename):
     name=filename.lower()
     if name.endswith(".xrdml"):
-        root=ET.fromstring(content); cn=root.find(".//{*}counts") or root.find(".//counts")
-        if cn is None: raise ValueError("No <counts> node found.")
-        I=np.array(cn.text.split(), dtype=float); sp=ep=None
-        for p in root.findall(".//{*}positions"):
-            if "2Theta" in p.get("axis",""):
-                try: sp=float(p.find("{*}startPosition").text); ep=float(p.find("{*}endPosition").text)
-                except: pass
-        tt=np.linspace(sp or 10.0, ep or 100.0, len(I)); return tt,I
-    lines=[ln.strip() for ln in content.splitlines() if ln.strip() and ln.strip()[0] not in "#!/'\";"]; data=[]
-    for ln in lines: parts=ln.replace(","," ").split()
-    try:
-        if len(parts)>=2: data.append((float(parts[0]),float(parts[1])))
-    except: continue
-    if not data: raise ValueError("Cannot parse — expected 2 columns: 2θ and Intensity.")
-    arr=np.array(data); tt,I=arr[:,0],arr[:,1]
-    if tt.max()<5: tt=np.degrees(tt)
-    if not np.all(tt[:-1]<=tt[1:]): idx=np.argsort(tt); tt,I=tt[idx],I[idx]
-    return tt,I
+        try:
+            root=ET.fromstring(content)
+            cn=root.find(".//{*}counts") or root.find(".//counts")
+            if cn is None: raise ValueError("No counts node found.")
+            I=np.array(cn.text.split(), dtype=float); sp=ep=None
+            for p in root.findall(".//{*}positions"):
+                if "2Theta" in p.get("axis",""):
+                    try: sp=float(p.find("{*}startPosition").text); ep=float(p.find("{*}endPosition").text)
+                    except: pass
+            tt=np.linspace(sp or 10.0, ep or 100.0, len(I))
+            return tt,I
+        except ET.ParseError as e: raise ValueError(f"XML error: {e}")
+            
+    lines=[ln.strip() for ln in content.splitlines() if ln.strip() and ln.strip()[0] not in "#!/'\";"]
+    data=[]
+    # Correct indentation here to ensure try/except is inside the loop
+    for ln in lines: 
+        parts = ln.replace(",", " ").split()
+        try:
+            if len(parts)>=2: data.append((float(parts[0]), float(parts[1])))
+        except ValueError:
+            continue # Now inside the loop
+            
+    if not data: raise ValueError("Cannot parse.")
+    arr = np.array(data)
+    tt, I = arr[:, 0], arr[:, 1]
+    if tt.max() < 5: tt = np.degrees(tt)
+    if not np.all(tt[:-1] <= tt[1:]):
+        idx = np.argsort(tt); tt, I = tt[idx], I[idx]
+    return tt, I
 
 def fetch_github_xrd(sample, ext=".ASC"):
     if sample not in AVAILABLE_FILES: raise ValueError(f"Sample '{sample}' not found.")
+    # First pass: try exact match
     for fn in AVAILABLE_FILES[sample]:
         if fn.endswith(ext):
-            try: r=requests.get(f"{GITHUB_RAW_BASE}{fn}", timeout=30); r.raise_for_status(); return parse_file_content(r.text, fn)+(fn,)
+            try:
+                r=requests.get(f"{GITHUB_RAW_BASE}{fn}", timeout=30)
+                r.raise_for_status()
+                return parse_file_content(r.text, fn) + (fn,)
             except: continue
+    # Second pass: try any extension
     for fn in AVAILABLE_FILES[sample]:
-        try: r=requests.get(f"{GITHUB_RAW_BASE}{fn}", timeout=30); r.raise_for_status(); return parse_file_content(r.text, fn)+(fn,)
+        try:
+            r=requests.get(f"{GITHUB_RAW_BASE}{fn}", timeout=30)
+            r.raise_for_status()
+            return parse_file_content(r.text, fn) + (fn,)
         except: continue
     raise ValueError(f"Could not fetch '{sample}'.")
 
@@ -488,7 +509,7 @@ with tabs[0]:
                     a_r,c_r=float(pp_vec[i][1]),float(pp_vec[i][2]); pks=generate_reflections(_make_refined_phase(ph,a_r,c_r),wl=wavelength,tt_min=float(tt.min()),tt_max=float(tt.max()))
                     phase_ticks[ph.name]=[p["tt"]+z_shift for p in pks]
                 buf=create_publication_figure(tt, Iobs, r["Icalc"], r["Ibg"], r["diff"], phase_ticks, rwp*100, rp*100, chi2, gof, st.session_state.selected_sample or "Co-Cr", f"{wl_label} ({wavelength}Å)", smooth)
-                st.pyplot(plt.gcf()) # Shows preview
+                st.image(buf)
                 st.download_button(f"📥 Download .{fmt.lower()}", buf, f"rietveld_plot.{fmt.lower()}", f"image/{fmt.lower()}")
         
         df=pd.DataFrame({"2θ":tt,"I_obs":Iobs,"I_calc":r["Icalc"],"I_bg":r["Ibg"],"Diff":r["diff"],**{f"I_{k}":v for k,v in r["contribs"].items()}})
