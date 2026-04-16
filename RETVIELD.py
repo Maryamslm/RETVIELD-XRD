@@ -68,17 +68,11 @@ def apply_theme(bg_theme: str, font_size: float, primary_color: str):
         @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;600;700&display=swap');
         html, body, [class*="css"] {{ font-family: 'IBM Plex Sans', sans-serif !important; font-size: {font_size}rem !important; }}
         code, pre {{ font-family: 'IBM Plex Mono', monospace !important; }}
-        
-        /* Main App Background */
         [data-testid="stAppViewContainer"] > .main {{ background-color: {t['bg']} !important; color: {t['text']} !important; }}
         [data-testid="stHeader"] {{ background: transparent; }}
-        
-        /* Sidebar */
         [data-testid="stSidebar"] {{ background: {t['sidebar']} !important; border-right: 1px solid {t['border']}; }}
         [data-testid="stSidebar"] * {{ color: {t['text']} !important; }}
         [data-testid="stSidebar"] .stSlider label, [data-testid="stSidebar"] .stCheckbox label {{ color: #94a3b8 !important; }}
-        
-        /* UI Elements */
         .stButton > button {{ border-radius: 8px !important; font-weight: 600 !important; letter-spacing: .03em !important; }}
         .stButton > button[kind="primary"] {{ background: linear-gradient(135deg, {primary_color}, #7c3aed) !important; border: none !important; color: white !important; }}
         .hero {{ background: linear-gradient(135deg, {t['bg']} 0%, {t['panel']} 45%, {t['bg']} 100%); border: 1px solid {t['border']}; border-radius: 14px; padding: 28px 36px 22px; margin-bottom: 22px; position: relative; overflow: hidden; }}
@@ -474,6 +468,22 @@ with st.sidebar:
     
     border_color = apply_theme(bg_theme, font_size, primary_color)
 
+    # 🏷️ PEAK LABELING CONTROLS
+    st.markdown('<div class="sh">🏷️ Peak Labels (Miller Indices)</div>', unsafe_allow_html=True)
+    show_hkl_labels = st.checkbox("Show (hkl) labels on peaks", value=True)
+    hkl_font_size = st.slider("Label font size", 8, 16, 10)
+    hkl_label_offset = st.slider("Label vertical offset (%)", 0, 50, 15, help="Offset labels above peaks to avoid overlap")
+    hkl_label_color = st.radio("Label color", ["Phase color", "White", "Black", "Custom"], index=0)
+    if hkl_label_color == "Custom":
+        custom_hkl_color = st.color_picker("Custom label color", "#ffffff")
+        hkl_color = custom_hkl_color
+    elif hkl_label_color == "White":
+        hkl_color = "#ffffff"
+    elif hkl_label_color == "Black":
+        hkl_color = "#000000"
+    else:
+        hkl_color = "phase"  # Use phase color
+
     st.markdown('<div class="sh">📁 GitHub Repository Files</div>', unsafe_allow_html=True)
     sample_options = list(AVAILABLE_FILES.keys())
     selected_sample = st.selectbox("Select XRD Sample", options=sample_options, index=0)
@@ -580,6 +590,7 @@ with tab_fit:
           <div class="mc"><div class="lbl">Points</div><div class="val">{len(tt)}</div><div class="sub">data pts</div></div>
           <div class="mc"><div class="lbl">Time</div><div class="val">{elapsed:.1f}</div><div class="sub">s</div></div>
         </div>""", unsafe_allow_html=True)
+        
         fig = make_subplots(rows=2, cols=1, row_heights=[0.78, 0.22], shared_xaxes=True, vertical_spacing=0.02)
         fig.add_trace(go.Scatter(x=tt, y=Iobs, mode="lines", name="I_obs (exp)", line=dict(color="#94a3b8", width=1.3)), row=1, col=1)
         fig.add_trace(go.Scatter(x=tt, y=r["Ibg"], mode="lines", name="Background", line=dict(color="#334155", width=1, dash="dot"), fill="tozeroy", fillcolor="rgba(51,65,85,0.12)"), row=1, col=1)
@@ -587,11 +598,52 @@ with tab_fit:
             ph, wf = PHASE_DB[key], r["wf"].get(key, 0) * 100
             fig.add_trace(go.Scatter(x=tt, y=Iph + r["Ibg"], mode="lines", name=f"{ph.name} ({wf:.1f}%)", line=dict(color=ph.color, width=1.6, dash="dash"), opacity=0.8), row=1, col=1)
         fig.add_trace(go.Scatter(x=tt, y=r["Icalc"], mode="lines", name="I_calc", line=dict(color="#fbbf24", width=2.2)), row=1, col=1)
-        y_tick = float(Iobs.min()) - 0.05*(float(Iobs.max()) - float(Iobs.min()))
-        for i, ph_obj in enumerate(refiner.phases):
-            a_ref, c_ref = float(pp_vec[i][1]), float(pp_vec[i][2]); ph_ref = _make_refined_phase(ph_obj, a_ref, c_ref)
-            pks = generate_reflections(ph_ref, wl=wavelength, tt_min=float(tt.min()), tt_max=float(tt.max()))
-            fig.add_trace(go.Scatter(x=[p["tt"]+z_shift for p in pks], y=[y_tick]*len(pks), mode="markers", marker=dict(symbol="line-ns", size=11, color=ph_obj.color, line=dict(width=2, color=ph_obj.color)), name=f"{ph_obj.name} hkl", showlegend=False), row=1, col=1)
+        
+        # 🏷️ ADD MILLER INDEX LABELS TO PEAKS
+        if show_hkl_labels:
+            y_max = float(Iobs.max())
+            y_min = float(Iobs.min())
+            y_range = y_max - y_min
+            label_y_pos = y_max + (y_range * hkl_label_offset / 100)
+            
+            for i, ph_obj in enumerate(refiner.phases):
+                a_ref, c_ref = float(pp_vec[i][1]), float(pp_vec[i][2])
+                ph_ref = _make_refined_phase(ph_obj, a_ref, c_ref)
+                pks = generate_reflections(ph_ref, wl=wavelength, tt_min=float(tt.min()), tt_max=float(tt.max()))
+                
+                # Add tick marks for peaks
+                y_tick = y_min - 0.05 * y_range
+                fig.add_trace(go.Scatter(
+                    x=[p["tt"]+z_shift for p in pks], y=[y_tick]*len(pks), mode="markers",
+                    marker=dict(symbol="line-ns", size=11, color=ph_obj.color, line=dict(width=2, color=ph_obj.color)),
+                    name=f"{ph_obj.name} hkl", showlegend=False
+                ), row=1, col=1)
+                
+                # Add (hkl) text labels above peaks
+                label_color = ph_obj.color if hkl_color == "phase" else hkl_color
+                for pk in pks:
+                    hkl_text = f"({pk['h']} {pk['k']} {pk['l']})"
+                    fig.add_annotation(
+                        x=pk["tt"] + z_shift, y=label_y_pos,
+                        text=hkl_text, showarrow=False,
+                        font=dict(size=hkl_font_size, color=label_color, family="IBM Plex Mono"),
+                        xanchor="center", yanchor="bottom",
+                        bordercolor=border_color, borderwidth=1, borderpad=2,
+                        bgcolor="rgba(0,0,0,0.3)" if bg_theme == "Dark Mode" else "rgba(255,255,255,0.7)"
+                    )
+        else:
+            # Just add tick marks without labels
+            y_tick = float(Iobs.min()) - 0.05*(float(Iobs.max()) - float(Iobs.min()))
+            for i, ph_obj in enumerate(refiner.phases):
+                a_ref, c_ref = float(pp_vec[i][1]), float(pp_vec[i][2])
+                ph_ref = _make_refined_phase(ph_obj, a_ref, c_ref)
+                pks = generate_reflections(ph_ref, wl=wavelength, tt_min=float(tt.min()), tt_max=float(tt.max()))
+                fig.add_trace(go.Scatter(
+                    x=[p["tt"]+z_shift for p in pks], y=[y_tick]*len(pks), mode="markers",
+                    marker=dict(symbol="line-ns", size=11, color=ph_obj.color, line=dict(width=2, color=ph_obj.color)),
+                    name=f"{ph_obj.name} hkl", showlegend=False
+                ), row=1, col=1)
+        
         fig.add_trace(go.Scatter(x=tt, y=r["diff"], mode="lines", name="Δ obs−calc", line=dict(color="#818cf8", width=1), fill="tozeroy", fillcolor="rgba(129,140,248,0.12)"), row=2, col=1)
         fig.add_hline(y=0, line=dict(color="#334155", width=1, dash="dash"), row=2, col=1)
         fig.update_layout(template=plot_theme, height=650, legend=dict(font=dict(size=11), x=1.01, y=1), margin=dict(l=65, r=210, t=15, b=55), font=dict(family="IBM Plex Sans"))
