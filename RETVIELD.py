@@ -406,7 +406,8 @@ def parse_file_content(content, filename):
         except ValueError:
             continue
             
-    if not  raise ValueError("Cannot parse.")
+    # ✅ FIXED: Added 'data' condition after 'if not'
+    if not data: raise ValueError("Cannot parse.")
     arr = np.array(data)
     tt, I = arr[:, 0], arr[:, 1]
     if tt.max() < 5: tt = np.degrees(tt)
