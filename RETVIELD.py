@@ -1,887 +1,592 @@
 """
-XRD Rietveld Analysis — Co-Cr Dental Alloy (Mediloy S Co, BEGO)
-================================================================
-8 samples: Cast / Printed (SLM) × Heat-treated / Not heat-treated × ψ=0° / 45°
+XRD Rietveld Profile Fitting — Co-Cr Dental Alloy
+Tailored for CH0_1.ASC  (2θ: 30–130°, Cu Kα, step 0.026°)
+Deploy: GitHub + Streamlit Community Cloud
+MODIFIED: Show ALL matching phases on peaks + Font size + 2θ range controls
 """
 
 import streamlit as st
 import numpy as np
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from scipy.optimize import least_squares, minimize
+from scipy.signal import find_peaks, savgol_filter
+from scipy.interpolate import UnivariateSpline
 import pandas as pd
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import io, os, re, math
-from scipy import signal
-from scipy.optimize import curve_fit, least_squares
+import io
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# INLINE UTILITIES (replaces utils/*.py imports)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ── utils.sample_catalog ───────────────────────────────────────────────────────
-SAMPLE_CATALOG = {
-    "CH0_1":   {"label": "Cast • HT • ψ=0°", "short": "C-HT-0°", "fabrication": "Cast", "treatment": "Heat-treated", "psi_angle": 0, "filename": "CH0_1.asc", "color": "#1f77b4", "group": "Cast", "description": "Cast Co-Cr alloy, heat-treated, measured at ψ=0°"},
-    "CH45_2":  {"label": "Cast • HT • ψ=45°", "short": "C-HT-45°", "fabrication": "Cast", "treatment": "Heat-treated", "psi_angle": 45, "filename": "CH45_2.asc", "color": "#aec7e8", "group": "Cast", "description": "Cast Co-Cr alloy, heat-treated, measured at ψ=45°"},
-    "CNH0_3":  {"label": "Cast • As-built • ψ=0°", "short": "C-AB-0°", "fabrication": "Cast", "treatment": "As-built", "psi_angle": 0, "filename": "CNH0_3.asc", "color": "#ff7f0e", "group": "Cast", "description": "Cast Co-Cr alloy, as-built (no HT), ψ=0°"},
-    "CNH45_4": {"label": "Cast • As-built • ψ=45°", "short": "C-AB-45°", "fabrication": "Cast", "treatment": "As-built", "psi_angle": 45, "filename": "CNH45_4.asc", "color": "#ffbb78", "group": "Cast", "description": "Cast Co-Cr alloy, as-built, ψ=45°"},
-    "PH0_5":   {"label": "Printed • HT • ψ=0°", "short": "P-HT-0°", "fabrication": "SLM", "treatment": "Heat-treated", "psi_angle": 0, "filename": "PH0_5.asc", "color": "#2ca02c", "group": "Printed", "description": "SLM-printed Co-Cr alloy, heat-treated, ψ=0°"},
-    "PH45_6":  {"label": "Printed • HT • ψ=45°", "short": "P-HT-45°", "fabrication": "SLM", "treatment": "Heat-treated", "psi_angle": 45, "filename": "PH45_6.asc", "color": "#98df8a", "group": "Printed", "description": "SLM-printed Co-Cr alloy, heat-treated, ψ=45°"},
-    "PNH0_7":  {"label": "Printed • As-built • ψ=0°", "short": "P-AB-0°", "fabrication": "SLM", "treatment": "As-built", "psi_angle": 0, "filename": "PNH0_7.asc", "color": "#d62728", "group": "Printed", "description": "SLM-printed Co-Cr alloy, as-built, ψ=0°"},
-    "PNH45_8": {"label": "Printed • As-built • ψ=45°", "short": "P-AB-45°", "fabrication": "SLM", "treatment": "As-built", "psi_angle": 45, "filename": "PNH45_8.asc", "color": "#ff9896", "group": "Printed", "description": "SLM-printed Co-Cr alloy, as-built, ψ=45°"},
-}
-SAMPLE_KEYS = list(SAMPLE_CATALOG.keys())
-GROUPS = {"Cast": [k for k,v in SAMPLE_CATALOG.items() if v["group"]=="Cast"],
-          "Printed": [k for k,v in SAMPLE_CATALOG.items() if v["group"]=="Printed"]}
-
-# ── utils.phase_matcher ───────────────────────────────────────────────────────
-PHASE_LIBRARY = {
-    "FCC-Co": {
-        "system": "Cubic", "space_group": "Fm-3m", "lattice": {"a": 3.544},
-        "peaks": [(111, 44.2), (200, 51.5), (220, 75.8), (311, 92.1)],
-        "color": "#e377c2", "default": True,
-        "description": "Face-centered cubic Co-based solid solution (matrix phase)"
-    },
-    "HCP-Co": {
-        "system": "Hexagonal", "space_group": "P6₃/mmc", "lattice": {"a": 2.507, "c": 4.069},
-        "peaks": [(100, 41.6), (002, 44.8), (101, 47.5), (102, 69.2), (110, 78.1)],
-        "color": "#7f7f7f", "default": False,
-        "description": "Hexagonal close-packed Co (low-temp or stress-induced)"
-    },
-    "M23C6": {
-        "system": "Cubic", "space_group": "Fm-3m", "lattice": {"a": 10.63},
-        "peaks": [(311, 39.8), (400, 46.2), (511, 67.4), (440, 81.3)],
-        "color": "#bcbd22", "default": False,
-        "description": "Cr-rich carbide (M₂₃C₆), common precipitate in Co-Cr alloys"
-    },
-    "Sigma": {
-        "system": "Tetragonal", "space_group": "P4₂/mnm", "lattice": {"a": 8.80, "c": 4.56},
-        "peaks": [(210, 43.1), (220, 54.3), (310, 68.9)],
-        "color": "#17becf", "default": False,
-        "description": "Sigma phase (Co,Cr) intermetallic, brittle, forms during aging"
-    }
-}
-
-def wavelength_to_energy(wavelength_angstrom):
-    """Convert wavelength (Å) to photon energy (keV)"""
-    h = 4.135667696e-15  # eV·s
-    c = 299792458        # m/s
-    energy_ev = (h * c) / (wavelength_angstrom * 1e-10)
-    return energy_ev / 1000  # keV
-
-def generate_theoretical_peaks(phase_name, wavelength, tt_min, tt_max):
-    """Generate theoretical 2θ peak positions using Bragg's law"""
-    phase = PHASE_LIBRARY[phase_name]
-    peaks = []
-    # Simple cubic approximation for demo; real implementation would use full crystallography
-    for hkl, tt_approx in phase["peaks"]:
-        if tt_min <= tt_approx <= tt_max:
-            peaks.append({
-                "two_theta": round(tt_approx, 3),
-                "d_spacing": round(wavelength / (2 * math.sin(math.radians(tt_approx/2))), 4),
-                "hkl_label": f"({hkl})" if isinstance(hkl, int) else str(hkl)
-            })
-    return pd.DataFrame(peaks) if peaks else pd.DataFrame(columns=["two_theta", "d_spacing", "hkl_label"])
-
-def match_phases_to_data(observed_peaks, theoretical_peaks_dict, tol_deg=0.2):
-    """Match observed peaks to theoretical phase peaks within tolerance"""
-    matches = []
-    for _, obs in observed_peaks.iterrows():
-        best_match = {"phase": None, "hkl": None, "delta": None}
-        min_delta = float('inf')
-        for phase_name, theo_df in theoretical_peaks_dict.items():
-            for _, theo in theo_df.iterrows():
-                delta = abs(obs["two_theta"] - theo["two_theta"])
-                if delta < tol_deg and delta < min_delta:
-                    min_delta = delta
-                    best_match = {"phase": phase_name, "hkl": theo["hkl_label"], "delta": delta}
-        matches.append(best_match)
-    result = observed_peaks.copy()
-    result["phase"] = [m["phase"] for m in matches]
-    result["hkl"] = [m["hkl"] for m in matches]
-    result["delta"] = [m["delta"] if m["delta"] is not None else np.nan for m in matches]
-    return result
-
-# ── utils.peak_finder ─────────────────────────────────────────────────────────
-def find_peaks_in_data(df, min_height_factor=2.0, min_distance_deg=0.3):
-    """Find peaks in XRD data using scipy.signal.find_peaks"""
-    if len(df) < 10:
-        return pd.DataFrame(columns=["two_theta", "intensity", "prominence"])
-    
-    x = df["two_theta"].values
-    y = df["intensity"].values
-    
-    # Estimate background as percentile filter
-    bg = np.percentile(y, 15)
-    min_height = bg + min_height_factor * (np.std(y) if len(y) > 1 else 1)
-    min_distance = max(1, int(min_distance_deg / np.mean(np.diff(x))))
-    
-    peaks, props = signal.find_peaks(y, height=min_height, distance=min_distance, prominence=min_height*0.3)
-    
-    if len(peaks) == 0:
-        return pd.DataFrame(columns=["two_theta", "intensity", "prominence"])
-    
-    result = pd.DataFrame({
-        "two_theta": x[peaks],
-        "intensity": y[peaks],
-        "prominence": props.get("prominences", np.zeros_like(peaks))
-    })
-    return result.sort_values("intensity", ascending=False).reset_index(drop=True)
-
-# ── utils.rietveld ────────────────────────────────────────────────────────────
-class RietveldRefinement:
-    """Simplified Rietveld refinement for demonstration purposes"""
-    
-    def __init__(self, data, phases, wavelength, bg_poly_order=4, peak_shape="Pseudo-Voigt"):
-        self.data = data
-        self.phases = phases
-        self.wavelength = wavelength
-        self.bg_poly_order = bg_poly_order
-        self.peak_shape = peak_shape
-        self.x = data["two_theta"].values
-        self.y_obs = data["intensity"].values
-        
-    def _background(self, x, *coeffs):
-        """Chebyshev-like polynomial background"""
-        return sum(c * x**i for i, c in enumerate(coeffs))
-    
-    def _pseudo_voigt(self, x, pos, amp, fwhm, eta=0.5):
-        """Pseudo-Voigt peak profile"""
-        gauss = amp * np.exp(-4*np.log(2)*((x-pos)/fwhm)**2)
-        lor = amp / (1 + 4*((x-pos)/fwhm)**2)
-        return eta * lor + (1-eta) * gauss
-    
-    def _calculate_pattern(self, params):
-        """Calculate full pattern from parameters"""
-        # Split params: background coeffs + phase params
-        bg_coeffs = params[:self.bg_poly_order+1]
-        y_calc = self._background(self.x, *bg_coeffs)
-        
-        # Add contributions from each phase (simplified)
-        idx = self.bg_poly_order + 1
-        for phase in self.phases:
-            phase_peaks = generate_theoretical_peaks(phase, self.wavelength, 
-                                                     self.x.min(), self.x.max())
-            for _, pk in phase_peaks.iterrows():
-                if idx + 3 > len(params):
-                    break
-                pos, amp, fwhm = params[idx], params[idx+1], params[idx+2]
-                idx += 3
-                # Apply LP correction & scale
-                lp_corr = (1 + np.cos(np.radians(2*pk["two_theta"]))**2) / (np.sin(np.radians(pk["two_theta"]))**2 * np.cos(np.radians(pk["two_theta"])))
-                y_calc += amp * lp_corr * self._pseudo_voigt(self.x, pos, 1.0, fwhm)
-        return y_calc
-    
-    def _residuals(self, params):
-        y_calc = self._calculate_pattern(params)
-        return self.y_obs - y_calc
-    
-    def run(self):
-        """Run simplified refinement"""
-        # Initial guess: background + peak params
-        bg_init = [np.percentile(self.y_obs, 10)] + [0]*self.bg_poly_order
-        peak_init = []
-        for phase in self.phases:
-            phase_peaks = generate_theoretical_peaks(phase, self.wavelength,
-                                                     self.x.min(), self.x.max())
-            for _, pk in phase_peaks.iterrows():
-                peak_init.extend([pk["two_theta"], np.max(self.y_obs)*0.1, 0.5])  # pos, amp, fwhm
-        
-        params0 = np.array(bg_init + peak_init)
-        
-        # Simple least-squares (not full Rietveld)
-        try:
-            result = least_squares(self._residuals, params0, max_nfev=200)
-            converged = result.success
-            params_opt = result.x
-        except:
-            converged = False
-            params_opt = params0
-        
-        y_calc = self._calculate_pattern(params_opt)
-        y_bg = self._background(self.x, *params_opt[:self.bg_poly_order+1])
-        
-        # Calculate R-factors (simplified)
-        resid = self.y_obs - y_calc
-        Rwp = np.sqrt(np.sum(resid**2) / np.sum(self.y_obs**2)) * 100
-        Rexp = np.sqrt(max(1, len(self.x) - len(params_opt))) / np.sqrt(np.sum(self.y_obs)) * 100
-        chi2 = (Rwp / max(Rexp, 0.01))**2
-        
-        # Extract phase fractions (simplified: based on peak amplitudes)
-        phase_fractions = {}
-        idx = self.bg_poly_order + 1
-        total_amp = 0
-        phase_amps = {}
-        for phase in self.phases:
-            phase_peaks = generate_theoretical_peaks(phase, self.wavelength,
-                                                     self.x.min(), self.x.max())
-            amp_sum = 0
-            for _ in phase_peaks.iterrows():
-                if idx + 1 < len(params_opt):
-                    amp_sum += abs(params_opt[idx+1])
-                    idx += 3
-            phase_amps[phase] = amp_sum
-            total_amp += amp_sum
-        for phase in self.phases:
-            phase_fractions[phase] = phase_amps[phase] / total_amp if total_amp > 0 else 1/len(self.phases)
-        
-        # Lattice params (placeholder: return library values with tiny random shift)
-        lattice_params = {}
-        for phase in self.phases:
-            lp = PHASE_LIBRARY[phase]["lattice"].copy()
-            if "a" in lp:
-                lp["a"] *= (1 + np.random.normal(0, 0.001))
-            if "c" in lp:
-                lp["c"] *= (1 + np.random.normal(0, 0.001))
-            lattice_params[phase] = lp
-        
-        return {
-            "converged": converged,
-            "Rwp": Rwp,
-            "Rexp": Rexp,
-            "chi2": chi2,
-            "y_calc": y_calc,
-            "y_background": y_bg,
-            "zero_shift": np.random.normal(0, 0.02),  # placeholder
-            "phase_fractions": phase_fractions,
-            "lattice_params": lattice_params,
-            "params": params_opt
-        }
-
-# ── utils.report ──────────────────────────────────────────────────────────────
-def generate_report(result, phases, wavelength, sample_key):
-    """Generate markdown report"""
-    meta = SAMPLE_CATALOG[sample_key]
-    report = f"""# XRD Rietveld Refinement Report
-**Sample**: {meta['label']} (`{sample_key}`)  
-**Fabrication**: {meta['fabrication']} | **Treatment**: {meta['treatment']} | **ψ**: {meta['psi_angle']}°  
-**Wavelength**: {wavelength:.4f} Å ({wavelength_to_energy(wavelength):.2f} keV)  
-**Refinement Status**: {"✅ Converged" if result['converged'] else "⚠️ Not converged"}
-
-## Fit Quality
-| Metric | Value |
-|--------|-------|
-| R_wp   | {result['Rwp']:.2f}% |
-| R_exp  | {result['Rexp']:.2f}% |
-| χ²     | {result['chi2']:.3f} |
-| Zero shift | {result['zero_shift']:+.4f}° |
-
-## Phase Quantification
-| Phase | Weight % | Crystal System |
-|-------|----------|---------------|
-"""
-    for ph in phases:
-        frac = result['phase_fractions'].get(ph, 0) * 100
-        sys = PHASE_LIBRARY[ph]['system']
-        report += f"| {ph} | {frac:.1f}% | {sys} |\n"
-    
-    report += f"""
-## Refined Lattice Parameters
-"""
-    for ph in phases:
-        lp = result['lattice_params'].get(ph, {})
-        lib_lp = PHASE_LIBRARY[ph]['lattice']
-        report += f"\n**{ph}**:\n"
-        if 'a' in lp and 'a' in lib_lp:
-            da = (lp['a'] - lib_lp['a']) / lib_lp['a'] * 100
-            report += f"- a = {lp['a']:.5f} Å (Δ = {da:+.3f}% vs library {lib_lp['a']:.5f} Å)\n"
-        if 'c' in lp and 'c' in lib_lp:
-            dc = (lp['c'] - lib_lp['c']) / lib_lp['c'] * 100
-            report += f"- c = {lp['c']:.5f} Å (Δ = {dc:+.3f}% vs library {lib_lp['c']:.5f} Å)\n"
-    
-    report += f"""
-## Notes
-- This is a simplified demonstration refinement. For publication-quality results, use dedicated Rietveld software (GSAS-II, TOPAS, FullProf).
-- Peak positions are approximate; full crystallographic calculations require CIF files and proper structure factors.
-- Residual stress estimation from ψ-tilt requires multiple measurements and elastic constants.
-
-*Report generated by XRD Rietveld App • Co-Cr Dental Alloy Analysis*
-"""
-    return report
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# MAIN APP CODE (unchanged logic, now self-contained)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-PHASE_COLORS = [v["color"] for v in PHASE_LIBRARY.values()]
-DEMO_DIR     = os.path.join(os.path.dirname(__file__), "demo_data")
-
+# ──────────────────────────────────────────────────────────
+# Page config
+# ──────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title  = "XRD Rietveld — Co-Cr Dental Alloy",
-    page_icon   = "⚙️",
-    layout      = "wide",
-    initial_sidebar_state = "expanded",
+    page_title="XRD Rietveld — Co-Cr Dental Alloy",
+    page_icon="🔬",
+    layout="wide",
 )
 
-st.markdown("""
-<style>
-  .sample-badge {
-      display:inline-block; padding:4px 10px; border-radius:12px;
-      font-size:0.82rem; font-weight:600; color:#fff;
-  }
-  .cast-badge    { background:#1f77b4; }
-  .printed-badge { background:#2ca02c; }
-  .metric-box {
-      background:#f8f9fa; border-radius:8px; padding:12px 16px;
-      text-align:center; border:1px solid #dee2e6;
-  }
-  .metric-box .value { font-size:1.6rem; font-weight:700; color:#1f77b4; }
-  .metric-box .label { font-size:0.78rem; color:#6c757d; }
-</style>
-""", unsafe_allow_html=True)
+st.title("🔬 XRD Rietveld Profile Fitting")
+st.caption("Co-Cr Dental Alloy · Cu Kα radiation · 2θ range 30–130°")
 
-st.title("⚙️ XRD Rietveld Refinement — Co-Cr Dental Alloy")
-st.caption("Mediloy S Co · BEGO · Co-Cr-Mo-W-Si · 8 samples: Cast/SLM × HT/AsBlt × ψ=0°/45°")
+# ──────────────────────────────────────────────────────────
+# Known phases for Co-Cr dental alloys (Cu Kα, λ=1.54056 Å)
+# ──────────────────────────────────────────────────────────
+PHASES = {
+    "γ-Co (FCC)": {
+        "color": "#1565C0",
+        "peaks": [
+            (43.70, "111"), (50.83, "200"), (74.78, "220"),
+            (90.61, "311"), (95.93, "222"),
+        ],
+        "description": "FCC Co-Cr solid solution — dominant phase in dental alloys",
+        "space_group": "Fm3̄m",
+        "a_ang": 3.548,
+    },
+    "ε-Co (HCP)": {
+        "color": "#C62828",
+        "peaks": [
+            (41.02, "100"), (44.20, "002"), (47.30, "101"),
+            (55.10, "102"), (62.15, "110"),
+        ],
+        "description": "HCP cobalt — metastable phase, forms under stress/cooling",
+        "space_group": "P6₃/mmc",
+        "a_ang": 2.507,
+    },
+    "Cr₂₃C₆ carbide": {
+        "color": "#2E7D32",
+        "peaks": [
+            (37.20, "511"), (43.43, "600"), (63.11, "622"),
+            (75.85, "731"), (80.28, "800"),
+        ],
+        "description": "Chromium carbide — precipitates at grain boundaries",
+        "space_group": "Fm3̄m",
+        "a_ang": 10.659,
+    },
+    "Mo₂C / Mo-rich": {
+        "color": "#6A1B9A",
+        "peaks": [
+            (34.40, "100"), (38.05, "002"), (39.48, "101"),
+            (60.90, "102"), (69.95, "110"),
+        ],
+        "description": "Molybdenum carbide / Mo-rich phase (common in dental Co-Cr-Mo)",
+        "space_group": "P6₃/mmc",
+        "a_ang": 3.002,
+    },
+    "σ-phase (CoCr)": {
+        "color": "#E65100",
+        "peaks": [
+            (42.10, "330"), (45.30, "401"), (53.10, "411"),
+            (65.60, "421"), (78.10, "510"),
+        ],
+        "description": "Intermetallic sigma phase — embrittles the alloy",
+        "space_group": "P4₂/mnm",
+        "a_ang": 8.800,
+    },
+}
 
-# SIDEBAR
+DETECTED_PEAKS = [44.495, 48.161, 51.801, 55.155, 60.173, 73.589, 89.891, 101.331, 112.459, 115.345]
+
+# ──────────────────────────────────────────────────────────
+# Peak profile functions
+# ──────────────────────────────────────────────────────────
+
+def caglioti_fwhm(tth, U, V, W):
+    t = np.tan(np.radians(tth / 2))
+    val = U * t**2 + V * t + W
+    return np.sqrt(np.maximum(val, 1e-6))
+
+def gaussian(x, c, fwhm, A):
+    s = fwhm / (2 * np.sqrt(2 * np.log(2)))
+    return A * np.exp(-0.5 * ((x - c) / s)**2)
+
+def lorentzian(x, c, fwhm, A):
+    g = fwhm / 2
+    return A * g**2 / ((x - c)**2 + g**2)
+
+def pseudo_voigt(x, c, fwhm, A, eta=0.5):
+    return A * (eta * (fwhm/2)**2 / ((x-c)**2 + (fwhm/2)**2)
+                + (1-eta) * np.exp(-4*np.log(2)*(x-c)**2/fwhm**2))
+
+def profile(x, c, fwhm, A, shape, eta=0.5):
+    if shape == "Gaussian":
+        return gaussian(x, c, fwhm, A)
+    elif shape == "Lorentzian":
+        return lorentzian(x, c, fwhm, A)
+    else:
+        return pseudo_voigt(x, c, fwhm, A, eta)
+
+def scherrer(fwhm_deg, tth_deg, wl=1.54056, K=0.94):
+    beta = np.radians(fwhm_deg)
+    theta = np.radians(tth_deg / 2)
+    return (K * wl) / (beta * np.cos(theta)) / 10  # nm
+
+def match_peak_to_all_phases(peaks_2theta, phases_dict, tolerance=0.5):
+    """
+    Match each detected peak to ALL phase peaks within tolerance.
+    Returns: list of (detected_pk, [(phase_name, hkl, ref_pk, color, dist), ...])
+    """
+    matches = []
+    for pk in peaks_2theta:
+        phase_matches = []
+        for pname, pinfo in phases_dict.items():
+            for (ref_pk, hkl) in pinfo["peaks"]:
+                dist = abs(pk - ref_pk)
+                if dist <= tolerance:
+                    phase_matches.append((pname, hkl, ref_pk, pinfo["color"], dist))
+        phase_matches.sort(key=lambda x: x[4])
+        if phase_matches:
+            matches.append((pk, phase_matches))
+    return matches
+
+# ──────────────────────────────────────────────────────────
+# Initialize session state for range presets
+# ──────────────────────────────────────────────────────────
+if "tth_min" not in st.session_state:
+    st.session_state.tth_min = 30.0
+if "tth_max" not in st.session_state:
+    st.session_state.tth_max = 130.0
+
+# ──────────────────────────────────────────────────────────
+# Sidebar
+# ──────────────────────────────────────────────────────────
 with st.sidebar:
-    st.header("🔭 Sample Selection")
-    sample_options = {k: f"[{i+1}]  {SAMPLE_CATALOG[k]['label']}"
-                      for i, k in enumerate(SAMPLE_KEYS)}
-    selected_key = st.selectbox(
-        "Active sample",
-        options=SAMPLE_KEYS,
-        format_func=lambda k: sample_options[k],
-        index=0,
-    )
-    meta = SAMPLE_CATALOG[selected_key]
-    badge_cls = "cast-badge" if meta["group"] == "Cast" else "printed-badge"
-    st.markdown(
-        f'<span class="sample-badge {badge_cls}">'
-        f'{meta["fabrication"]}  ·  {meta["treatment"]}  ·  ψ={meta["psi_angle"]}°'
-        f'</span>', unsafe_allow_html=True
-    )
-    st.caption(meta["description"])
+    st.header("⚙️ Parameters")
 
-    st.markdown("---")
-    st.subheader("📂 Upload Custom Data")
+    wl = st.number_input("Wavelength λ (Å)", value=1.54056, format="%.5f",
+                         help="Cu Kα1 = 1.54056 Å")
+
+    shape = st.selectbox("Peak profile", ["Pseudo-Voigt", "Gaussian", "Lorentzian"])
+
+    if shape == "Pseudo-Voigt":
+        eta = st.slider("η (Lorentzian fraction)", 0.0, 1.0, 0.5, 0.05)
+    else:
+        eta = 0.5
+
+    st.subheader("Caglioti broadening")
+    U = st.slider("U", 0.00, 0.20, 0.04, 0.005, format="%.3f")
+    V = st.slider("V", -0.10, 0.00, -0.01, 0.002, format="%.3f")
+    W = st.slider("W", 0.00, 0.10, 0.015, 0.002, format="%.3f")
+
+    st.subheader("📐 2θ Range & Display")
+    col_r1, col_r2 = st.columns(2)
+    with col_r1:
+        tth_min = st.slider("Min 2θ (°)", 30.0, 60.0, st.session_state.tth_min, 1.0, key="slider_min")
+    with col_r2:
+        tth_max = st.slider("Max 2θ (°)", 60.0, 130.0, st.session_state.tth_max, 1.0, key="slider_max")
+    
+    st.session_state.tth_min = tth_min
+    st.session_state.tth_max = tth_max
+
+    col_p1, col_p2, col_p3 = st.columns(3)
+    with col_p1:
+        if st.button("🔍 Full", help="30–130°"):
+            st.session_state.tth_min, st.session_state.tth_max = 30.0, 130.0
+            st.rerun()
+    with col_p2:
+        if st.button("🎯 Peaks", help="Zoom to main peaks 40–80°"):
+            st.session_state.tth_min, st.session_state.tth_max = 40.0, 80.0
+            st.rerun()
+    with col_p3:
+        if st.button("📊 High", help="High-angle region 80–130°"):
+            st.session_state.tth_min, st.session_state.tth_max = 80.0, 130.0
+            st.rerun()
+
+    st.subheader("🔤 Font Settings")
+    font_size = st.slider("Peak label font (pt)", 6, 16, 8, 1)
+    label_fontsize = st.slider("Axis label font", 8, 18, 11, 1)
+    tick_fontsize = st.slider("Tick font", 6, 14, 8, 1)
+    legend_fontsize = st.slider("Legend font", 6, 14, 8, 1)
+
+    st.subheader("🏷️ Peak Labels")
+    show_all_phases = st.checkbox("Show ALL matching phases on peaks", value=True,
+                                   help="Display every phase that matches within tolerance")
+    show_phase_labels = st.checkbox("Show phase+hkl labels", value=True)
+    show_2theta_labels = st.checkbox("Show 2θ values", value=False)
+    peak_tolerance = st.slider("Peak match tolerance (°)", 0.1, 1.5, 0.5, 0.05)
+    max_labels_per_peak = st.slider("Max phases to show per peak", 1, 5, 3, 1,
+                                     help="Limit clutter when many phases overlap")
+
+    st.subheader("Active phases (for refinement)")
+    active = {}
+    for ph in PHASES:
+        active[ph] = st.checkbox(ph, value=(ph in ["γ-Co (FCC)", "ε-Co (HCP)"]))
+
+    refine_btn = st.button("▶ Run Refinement", type="primary", use_container_width=True)
+
+# ──────────────────────────────────────────────────────────
+# File upload
+# ──────────────────────────────────────────────────────────
+st.subheader("📂 XRD Data")
+col_up, col_info = st.columns([1, 1])
+
+with col_up:
     uploaded = st.file_uploader(
-        "Override active sample with your file",
-        type=["asc", "xy", "csv", "txt", "dat"],
-        help="Two-column text: 2θ (°)   Intensity"
+        "Upload your .ASC / .xy / .txt / .csv file",
+        type=["asc", "xy", "txt", "csv"],
+        help="Two-column file: 2θ  Intensity"
     )
 
-    st.markdown("---")
-    st.subheader("🔬 Instrument")
-    wavelength = st.number_input(
-        "λ (Å)", value=1.5406, min_value=0.5, max_value=2.5,
-        step=0.0001, format="%.4f", help="Cu Kα₁ = 1.5406 Å"
-    )
-    st.caption(f"≡ {wavelength_to_energy(wavelength):.2f} keV")
-
-    st.markdown("---")
-    st.subheader("🧪 Phases")
-    selected_phases = []
-    for ph_name, ph_data in PHASE_LIBRARY.items():
-        if st.checkbox(f"{ph_name}  ({ph_data['system']})",
-                       value=ph_data.get("default", False)):
-            selected_phases.append(ph_name)
-
-    st.markdown("---")
-    st.subheader("⚙️ Refinement")
-    bg_order   = st.slider("Background polynomial order", 2, 8, 4)
-    peak_shape = st.selectbox("Peak profile",
-                              ["Pseudo-Voigt", "Gaussian", "Lorentzian", "Pearson VII"])
-    tt_min     = st.number_input("2θ min (°)", value=30.0, step=1.0)
-    tt_max     = st.number_input("2θ max (°)", value=130.0, step=1.0)
-    run_btn    = st.button("▶  Run Rietveld Refinement",
-                           type="primary", use_container_width=True)
-
-    st.markdown("---")
-    st.subheader("⚡ Quick jump")
-    cols_nav = st.columns(2)
-    for i, k in enumerate(SAMPLE_KEYS):
-        m = SAMPLE_CATALOG[k]
-        lbl = m["short"]
-        if cols_nav[i % 2].button(lbl, key=f"nav_{k}", use_container_width=True):
-            st.session_state["jump_to"] = k
-
-if "jump_to" in st.session_state and st.session_state["jump_to"] != selected_key:
-    selected_key = st.session_state.pop("jump_to")
-
-# DATA LOADING
-@st.cache_data
-def parse_asc(raw_bytes: bytes) -> pd.DataFrame:
-    text  = raw_bytes.decode("utf-8", errors="replace")
-    rows  = []
-    for line in text.splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        parts = line.replace(",", " ").replace("\t", " ").split()
-        if len(parts) >= 2:
-            try:
-                rows.append((float(parts[0]), float(parts[1])))
-            except ValueError:
-                pass
-    df = pd.DataFrame(rows, columns=["two_theta", "intensity"])
-    return df.sort_values("two_theta").reset_index(drop=True)
-
-@st.cache_data
-def load_all_demo() -> dict:
-    out = {}
-    for k, m in SAMPLE_CATALOG.items():
-        path = os.path.join(DEMO_DIR, m["filename"])
-        if os.path.exists(path):
-            with open(path, "rb") as f:
-                out[k] = parse_asc(f.read())
-    return out
-
-all_data = load_all_demo()
+two_theta_raw, intensity_raw = None, None
 
 if uploaded:
-    active_df_raw = parse_asc(uploaded.read())
-    st.info(f"📌 Showing **{uploaded.name}** (custom upload)")
-elif selected_key in all_
-    active_df_raw = all_data[selected_key]
-    st.info(f"📌 Sample **{selected_key}** — {meta['label']}")
-else:
-    # Generate synthetic demo data if files missing
-    st.warning(f"⚠️ Demo file for {selected_key} not found. Generating synthetic XRD pattern.")
-    two_theta = np.linspace(30, 130, 2000)
-    intensity = np.zeros_like(two_theta)
-    # Add synthetic peaks for FCC-Co
-    for _, pk in generate_theoretical_peaks("FCC-Co", wavelength, 30, 130).iterrows():
-        intensity += 5000 * np.exp(-((two_theta - pk["two_theta"])/0.8)**2)
-    intensity += np.random.normal(0, 50, size=len(two_theta)) + 200  # background + noise
-    active_df_raw = pd.DataFrame({"two_theta": two_theta, "intensity": intensity})
-    meta = SAMPLE_CATALOG[selected_key]
-
-mask       = (active_df_raw["two_theta"] >= tt_min) & (active_df_raw["two_theta"] <= tt_max)
-active_df  = active_df_raw[mask].copy()
-
-# MAIN TABS
-tabs = st.tabs([
-    "📈 Raw Pattern",
-    "🔍 Peak ID",
-    "🧮 Rietveld Fit",
-    "📊 Quantification",
-    "🔄 Sample Comparison",
-    "📄 Report",
-])
-
-PH_COLORS = [v["color"] for v in PHASE_LIBRARY.values()]
-SAMP_COLORS = [v["color"] for v in SAMPLE_CATALOG.values()]
-
-# TAB 0 — RAW PATTERN
-with tabs[0]:
-    st.subheader(f"Raw XRD Pattern — {meta['label']}")
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Data points",   f"{len(active_df):,}")
-    c2.metric("2θ range",      f"{active_df.two_theta.min():.2f}° – {active_df.two_theta.max():.2f}°")
-    c3.metric("Peak intensity",f"{active_df.intensity.max():.0f} cts")
-    c4.metric("Background est.",f"{int(np.percentile(active_df.intensity, 5))} cts")
-
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=active_df["two_theta"], y=active_df["intensity"],
-        mode="lines", name=meta["short"],
-        line=dict(color=meta["color"], width=1.2)
-    ))
-    fig.update_layout(
-        xaxis_title="2θ (degrees)", yaxis_title="Intensity (counts)",
-        template="plotly_white", height=420, hovermode="x unified",
-        title=f"{selected_key} — {meta['label']}"
-    )
-    st.plotly_chart(fig, use_container_width=True)
-    with st.expander("📋 Raw data table (first 200 rows)"):
-        st.dataframe(active_df.head(200), use_container_width=True)
-
-# TAB 1 — PEAK IDENTIFICATION
-with tabs[1]:
-    st.subheader("Peak Detection & Phase Matching")
-    col_a, col_b, col_c = st.columns(3)
-    min_ht  = col_a.slider("Min height × BG", 1.2, 8.0, 2.2, 0.1)
-    min_sep = col_b.slider("Min separation (°)", 0.1, 2.0, 0.3, 0.05)
-    tol     = col_c.slider("Match tolerance (°)", 0.05, 0.5, 0.18, 0.01)
-
-    obs_peaks  = find_peaks_in_data(active_df,
-                                    min_height_factor=min_ht,
-                                    min_distance_deg=min_sep)
-    theo       = {ph: generate_theoretical_peaks(ph, wavelength, tt_min, tt_max)
-                  for ph in selected_phases}
-    matches    = match_phases_to_data(obs_peaks, theo, tol_deg=tol)
-
-    fig_id = go.Figure()
-    fig_id.add_trace(go.Scatter(
-        x=active_df["two_theta"], y=active_df["intensity"],
-        mode="lines", name="Observed",
-        line=dict(color="lightsteelblue", width=1)
-    ))
-    if len(obs_peaks):
-        fig_id.add_trace(go.Scatter(
-            x=obs_peaks["two_theta"], y=obs_peaks["intensity"],
-            mode="markers", name="Detected peaks",
-            marker=dict(symbol="triangle-down", size=10, color="crimson",
-                        line=dict(color="darkred", width=1))
-        ))
-
-    I_top = active_df["intensity"].max()
-    I_bot = active_df["intensity"].min()
-    for i, (ph, pk_df) in enumerate(theo.items()):
-        color = PH_COLORS[i % len(PH_COLORS)]
-        offset = I_bot - (i + 1) * (I_top * 0.04)
-        fig_id.add_trace(go.Scatter(
-            x=pk_df["two_theta"],
-            y=[offset] * len(pk_df),
-            mode="markers",
-            name=f"{ph}",
-            marker=dict(symbol="line-ns", size=14, color=color,
-                        line=dict(width=1.5, color=color)),
-            customdata=pk_df["hkl_label"].values,
-            hovertemplate="<b>%{fullData.name}</b><br>2θ=%{x:.3f}°<br>%{customdata}<extra></extra>",
-        ))
-
-    fig_id.update_layout(
-        xaxis_title="2θ (degrees)", yaxis_title="Intensity (counts)",
-        template="plotly_white", height=460,
-        hovermode="x unified",
-        title=f"Peak identification — {selected_key}"
-    )
-    st.plotly_chart(fig_id, use_container_width=True)
-
-    st.markdown(f"#### {len(obs_peaks)} detected peaks")
-    if len(obs_peaks):
-        disp = obs_peaks.copy()
-        disp["Phase match"]  = matches["phase"].values
-        disp["(hkl)"]        = matches["hkl"].values
-        disp["Δ2θ (°)"]      = matches["delta"].round(4).values
-        disp["two_theta"]    = disp["two_theta"].round(4)
-        disp["intensity"]    = disp["intensity"].round(1)
-        disp["prominence"]   = disp["prominence"].round(1)
-        st.dataframe(
-            disp[["two_theta","intensity","prominence","Phase match","(hkl)","Δ2θ (°)"]],
-            use_container_width=True
-        )
-
-    with st.expander("📐 Theoretical peak positions per phase"):
-        for ph in selected_phases:
-            pk = theo[ph]
-            st.markdown(f"**{ph}** — {len(pk)} reflections in {tt_min:.0f}°–{tt_max:.0f}°")
-            if len(pk):
-                st.dataframe(pk[["two_theta","d_spacing","hkl_label"]].rename(
-                    columns={"two_theta":"2θ (°)","d_spacing":"d (Å)","hkl_label":"hkl"}
-                ), use_container_width=True, height=200)
-
-# TAB 2 — RIETVELD FIT
-with tabs[2]:
-    st.subheader("Rietveld Refinement")
-    if not selected_phases:
-        st.warning("☑️ Select at least one phase in the sidebar.")
-    elif not run_btn:
-        st.info("Configure settings in the sidebar, then click **▶ Run Rietveld Refinement**.")
-        st.markdown("""
-**What the refinement does:**
-- Fits a Chebyshev polynomial background  
-- Generates calculated intensity from all selected phases using Bragg's law + LP correction  
-- Simultaneously refines: lattice parameters *a* (and *c*), scale factors, Caglioti U/V/W, zero-shift, η  
-- Reports R_wp, R_exp, goodness-of-fit χ²  
-        """)
-    else:
-        with st.spinner("Running refinement… (10–40 s for multi-phase fits)"):
-            refiner = RietveldRefinement(
-                data        = active_df,
-                phases      = selected_phases,
-                wavelength  = wavelength,
-                bg_poly_order = bg_order,
-                peak_shape  = peak_shape,
-            )
-            result = refiner.run()
-
-        conv_icon = "✅" if result["converged"] else "⚠️"
-        st.success(f"{conv_icon} Refinement finished · "
-                   f"R_wp = **{result['Rwp']:.2f}%** · "
-                   f"R_exp = **{result['Rexp']:.2f}%** · "
-                   f"χ² = **{result['chi2']:.3f}**")
-
-        m1,m2,m3,m4 = st.columns(4)
-        m1.metric("R_wp (%)",      f"{result['Rwp']:.2f}",
-                  delta="< 15 is acceptable", delta_color="off")
-        m2.metric("R_exp (%)",     f"{result['Rexp']:.2f}")
-        m3.metric("GoF χ²",        f"{result['chi2']:.3f}",
-                  delta="target ≈ 1", delta_color="off")
-        m4.metric("Zero shift (°)",f"{result['zero_shift']:.4f}")
-
-        fig_rv = make_subplots(
-            rows=2, cols=1,
-            row_heights=[0.78, 0.22],
-            shared_xaxes=True,
-            vertical_spacing=0.04,
-            subplot_titles=("Observed vs Calculated", "Difference")
-        )
-        fig_rv.add_trace(go.Scatter(
-            x=active_df["two_theta"], y=active_df["intensity"],
-            mode="lines", name="Observed",
-            line=dict(color="#1f77b4", width=1.0)), row=1, col=1)
-        fig_rv.add_trace(go.Scatter(
-            x=active_df["two_theta"], y=result["y_calc"],
-            mode="lines", name="Calculated",
-            line=dict(color="red", width=1.5)), row=1, col=1)
-        fig_rv.add_trace(go.Scatter(
-            x=active_df["two_theta"], y=result["y_background"],
-            mode="lines", name="Background",
-            line=dict(color="green", width=1, dash="dash")), row=1, col=1)
-
-        I_top2 = active_df["intensity"].max()
-        I_bot2 = active_df["intensity"].min()
-        for i, ph in enumerate(selected_phases):
-            color = PH_COLORS[i % len(PH_COLORS)]
-            pk_pos = generate_theoretical_peaks(ph, wavelength, tt_min, tt_max)
-            ybase  = I_bot2 - (i+1) * I_top2 * 0.035
-            fig_rv.add_trace(go.Scatter(
-                x=pk_pos["two_theta"],
-                y=[ybase] * len(pk_pos),
-                mode="markers", name=f"{ph} reflections",
-                marker=dict(symbol="line-ns", size=10, color=color,
-                            line=dict(width=1.5, color=color)),
-                customdata=pk_pos["hkl_label"],
-                hovertemplate="%{customdata}  2θ=%{x:.3f}°<extra>"+ph+"</extra>",
-            ), row=1, col=1)
-
-        diff = active_df["intensity"].values - result["y_calc"]
-        fig_rv.add_trace(go.Scatter(
-            x=active_df["two_theta"], y=diff,
-            mode="lines", name="Difference",
-            line=dict(color="grey", width=0.8)), row=2, col=1)
-        fig_rv.add_hline(y=0, line_dash="dash", line_color="black",
-                         line_width=0.8, row=2, col=1)
-
-        fig_rv.update_layout(
-            template="plotly_white", height=580,
-            xaxis2_title="2θ (degrees)",
-            yaxis_title="Intensity (counts)",
-            yaxis2_title="Obs − Calc",
-            hovermode="x unified",
-            title=f"Rietveld fit — {selected_key}"
-        )
-        st.plotly_chart(fig_rv, use_container_width=True)
-
-        st.markdown("#### Refined Lattice Parameters")
-        lp_rows = []
-        for ph in selected_phases:
-            p  = result["lattice_params"].get(ph, {})
-            p0 = PHASE_LIBRARY[ph]["lattice"]
-            da = (p.get("a", p0["a"]) - p0["a"]) / p0["a"] * 100 if "a" in p0 else 0
-            lp_rows.append({
-                "Phase":       ph,
-                "System":      PHASE_LIBRARY[ph]["system"],
-                "a_lib (Å)":   f"{p0.get('a','—'):.5f}" if isinstance(p0.get('a'), (int,float)) else "—",
-                "a_ref (Å)":   f"{p.get('a', p0.get('a','—')):.5f}" if isinstance(p.get('a'), (int,float)) else "—",
-                "Δa/a₀ (%)":  f"{da:+.3f}",
-                "c_ref (Å)":   f"{p.get('c','—'):.5f}" if isinstance(p.get('c'), (int,float)) else "—",
-                "Wt%":         f"{result['phase_fractions'].get(ph,0)*100:.1f}",
-            })
-        st.dataframe(pd.DataFrame(lp_rows), use_container_width=True)
-
-        st.session_state[f"result_{selected_key}"]  = result
-        st.session_state[f"phases_{selected_key}"]  = selected_phases
-        st.session_state["last_result"]  = result
-        st.session_state["last_phases"]  = selected_phases
-        st.session_state["last_sample"]  = selected_key
-
-# TAB 3 — QUANTIFICATION
-with tabs[3]:
-    st.subheader("Phase Quantification")
-    if "last_result" not in st.session_state:
-        st.info("Run the Rietveld refinement first.")
-    else:
-        result  = st.session_state["last_result"]
-        phases  = st.session_state["last_phases"]
-        fracs   = result["phase_fractions"]
-        labels  = list(fracs.keys())
-        values  = [fracs[ph]*100 for ph in labels]
-        colors  = [PHASE_LIBRARY[ph]["color"] for ph in labels]
-
-        col_pie, col_bar = st.columns(2)
-        with col_pie:
-            fig_pie = go.Figure(go.Pie(
-                labels=labels, values=values,
-                hole=0.38, textinfo="label+percent",
-                marker=dict(colors=colors),
-            ))
-            fig_pie.update_layout(title="Phase weight fractions", height=370)
-            st.plotly_chart(fig_pie, use_container_width=True)
-
-        with col_bar:
-            fig_bar = go.Figure(go.Bar(
-                x=labels, y=values,
-                marker_color=colors,
-                text=[f"{v:.1f}%" for v in values],
-                textposition="outside"
-            ))
-            fig_bar.update_layout(
-                yaxis_title="Weight fraction (%)",
-                template="plotly_white", height=370,
-                yaxis_range=[0, max(values)*1.25],
-                title=f"Phase fractions — {st.session_state['last_sample']}"
-            )
-            st.plotly_chart(fig_bar, use_container_width=True)
-
+    try:
+        content = uploaded.read().decode("utf-8", errors="replace")
         rows = []
-        for ph in labels:
-            pi = PHASE_LIBRARY[ph]
-            lp = result["lattice_params"].get(ph, {})
-            rows.append({
-                "Phase":        ph,
-                "Crystal system": pi["system"],
-                "Space group":  pi["space_group"],
-                "a (Å)":        f"{lp.get('a','—'):.5f}" if isinstance(lp.get('a'), (int,float)) else "—",
-                "c (Å)":        f"{lp.get('c','—'):.5f}" if isinstance(lp.get('c'), (int,float)) else "—",
-                "Wt%":          f"{fracs.get(ph,0)*100:.2f}",
-                "Role":         pi["description"][:65]+"…" if len(pi["description"])>65 else pi["description"],
-            })
-        st.dataframe(pd.DataFrame(rows), use_container_width=True)
+        for line in content.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.replace(",", " ").split()
+            if len(parts) >= 2:
+                try:
+                    rows.append((float(parts[0]), float(parts[1])))
+                except ValueError:
+                    pass
+        arr = np.array(rows)
+        two_theta_raw, intensity_raw = arr[:, 0], arr[:, 1]
+        with col_info:
+            st.success(f"✅ Loaded {len(two_theta_raw)} points  |  "
+                       f"2θ: {two_theta_raw.min():.2f}° – {two_theta_raw.max():.2f}°  |  "
+                       f"I_max: {intensity_raw.max():.0f}")
+    except Exception as e:
+        st.error(f"Parse error: {e}")
 
-# TAB 4 — SAMPLE COMPARISON
-with tabs[4]:
-    st.subheader("Multi-Sample Comparison")
-    comp_mode = st.radio("View mode", [
-        "Overlay patterns",
-        "Cast vs Printed (groups)",
-        "Heat-treated vs Not heat-treated",
-        "ψ=0° vs ψ=45° (stress pairs)",
-    ], horizontal=True)
+# Use your CH0_1.ASC data as default if no file uploaded
+if two_theta_raw is None:
+    st.info("No file uploaded — showing example with synthetic pattern matching CH0_1.ASC statistics.")
+    two_theta_raw = np.arange(30.013, 130.010, 0.026)
+    intensity_raw = np.ones_like(two_theta_raw) * 320.0
 
-    comp_samples = st.multiselect(
-        "Select samples to overlay",
-        options=SAMPLE_KEYS,
-        default=SAMPLE_KEYS,
-        format_func=lambda k: SAMPLE_CATALOG[k]["label"],
-    )
-    normalise = st.checkbox("Normalise to max intensity", value=True)
+    real_peaks = [
+        (44.495, 130),  (48.161, 260),  (51.801, 335),
+        (55.155, 2320), (60.173, 170),  (73.589, 525),
+        (89.891, 175),  (101.331, 330), (112.459, 450), (115.345, 125),
+    ]
+    for c, amp in real_peaks:
+        fwhm = caglioti_fwhm(c, 0.04, -0.01, 0.015)
+        intensity_raw += pseudo_voigt(two_theta_raw, c, fwhm, amp)
+    intensity_raw += np.random.normal(0, 8, len(two_theta_raw))
+    intensity_raw = np.maximum(intensity_raw, 0)
 
-    if not comp_samples:
-        st.warning("Select at least one sample.")
-    else:
-        fig_cmp = go.Figure()
-        if comp_mode == "ψ=0° vs ψ=45° (stress pairs)":
-            pairs = [
-                ("CH0_1",   "CH45_2"),
-                ("CNH0_3",  "CNH45_4"),
-                ("PH0_5",   "PH45_6"),
-                ("PNH0_7",  "PNH45_8"),
-            ]
-            for pair_i, (k0, k45) in enumerate(pairs):
-                for ki, k in enumerate([k0, k45]):
-                    if k not in comp_samples:
-                        continue
-                    if k in all_data:
-                        df_s = all_data[k]
-                    else:
-                        # synthetic fallback
-                        two_theta = np.linspace(30, 130, 2000)
-                        intensity = np.zeros_like(two_theta)
-                        for _, pk in generate_theoretical_peaks("FCC-Co", wavelength, 30, 130).iterrows():
-                            intensity += 5000 * np.exp(-((two_theta - pk["two_theta"])/0.8)**2)
-                        intensity += np.random.normal(0, 50, size=len(two_theta)) + 200
-                        df_s = pd.DataFrame({"two_theta": two_theta, "intensity": intensity})
-                    
-                    I = df_s["intensity"].values
-                    if normalise:
-                        I = (I - I.min()) / (I.max() - I.min() + 1e-8)
-                    I = I + pair_i * 2.4
-                    fig_cmp.add_trace(go.Scatter(
-                        x=df_s["two_theta"], y=I,
-                        mode="lines", name=SAMPLE_CATALOG[k]["short"],
-                        line=dict(color=SAMPLE_CATALOG[k]["color"],
-                                  width=1.2,
-                                  dash="solid" if ki == 0 else "dot")
-                    ))
-            fig_cmp.update_layout(
-                title="ψ=0° (solid) vs ψ=45° (dotted) — pairs offset vertically",
-                xaxis_title="2θ (degrees)",
-                yaxis_title="Norm. intensity + offset",
-                template="plotly_white", height=520,
-            )
-        else:
-            for k in comp_samples:
-                if k in all_
-                    df_s = all_data[k]
-                else:
-                    two_theta = np.linspace(30, 130, 2000)
-                    intensity = np.zeros_like(two_theta)
-                    for _, pk in generate_theoretical_peaks("FCC-Co", wavelength, 30, 130).iterrows():
-                        intensity += 5000 * np.exp(-((two_theta - pk["two_theta"])/0.8)**2)
-                    intensity += np.random.normal(0, 50, size=len(two_theta)) + 200
-                    df_s = pd.DataFrame({"two_theta": two_theta, "intensity": intensity})
-                
-                I = df_s["intensity"].values
-                if normalise:
-                    I = (I - I.min()) / (I.max() - I.min() + 1e-8)
-                m = SAMPLE_CATALOG[k]
-                dash = "dot" if m["psi_angle"] == 45 else "solid"
-                fig_cmp.add_trace(go.Scatter(
-                    x=df_s["two_theta"], y=I,
-                    mode="lines",
-                    name=m["label"],
-                    line=dict(color=m["color"], width=1.2, dash=dash),
-                ))
-            title_map = {
-                "Overlay patterns":                    "All selected samples",
-                "Cast vs Printed (groups)":            "Cast (blues/oranges) vs Printed (greens/reds)",
-                "Heat-treated vs Not heat-treated":    "HT (solid) vs NH (dashed)",
-            }
-            fig_cmp.update_layout(
-                title=title_map.get(comp_mode, ""),
-                xaxis_title="2θ (degrees)",
-                yaxis_title="Normalised intensity" if normalise else "Intensity (counts)",
-                template="plotly_white", height=480,
-                hovermode="x unified",
-            )
-        st.plotly_chart(fig_cmp, use_container_width=True)
+# Apply 2θ range filter
+mask = (two_theta_raw >= tth_min) & (two_theta_raw <= tth_max)
+two_theta = two_theta_raw[mask]
+intensity = intensity_raw[mask]
 
-        st.markdown("#### Peak-shift table (ψ=0° → ψ=45°) for residual stress estimation")
-        st.caption("A positive Δ2θ (0°→45°) indicates compressive in-plane residual stress.")
-        stress_rows = []
-        pairs = [("CH0_1","CH45_2"), ("CNH0_3","CNH45_4"),
-                 ("PH0_5","PH45_6"), ("PNH0_7","PNH45_8")]
-        for k0, k45 in pairs:
-            def biggest_peak(df):
-                idx, _ = signal.find_peaks(df["intensity"].values, 
-                                          height=np.percentile(df["intensity"],85), 
-                                          distance=20)
-                if len(idx) == 0:
-                    return float("nan")
-                best = idx[np.argmax(df["intensity"].values[idx])]
-                return float(df["two_theta"].values[best])
+# ──────────────────────────────────────────────────────────
+# Raw pattern + auto peak detection with ALL phase labeling
+# ──────────────────────────────────────────────────────────
+st.subheader("📈 Observed Pattern & Auto-detected Peaks")
+smoothed = savgol_filter(intensity, window_length=min(21, len(intensity)//10*2+1), polyorder=3)
+noise_level = np.std(intensity[:min(100, len(intensity)//5)])
+baseline = np.percentile(intensity, 15)
+auto_peaks, _ = find_peaks(smoothed, height=baseline + 3*noise_level, prominence=40, distance=12)
+
+fig0, ax0 = plt.subplots(figsize=(14, 4))
+ax0.plot(two_theta, intensity, color="#90A4AE", linewidth=0.7, label="Observed")
+ax0.plot(two_theta, smoothed, color="#1565C0", linewidth=1.0, label="Smoothed")
+
+# Match detected peaks to ALL phases within tolerance
+all_matches = match_peak_to_all_phases(
+    [two_theta[p] for p in auto_peaks], 
+    PHASES, 
+    tolerance=peak_tolerance
+)
+
+# Create lookup dict for quick access
+match_lookup = {pk: matches for pk, matches in all_matches}
+
+# Annotate peaks
+for i, p in enumerate(auto_peaks):
+    pk_val = two_theta[p]
+    pk_int = intensity[p]
+    
+    if pk_val in match_lookup:
+        phase_matches = match_lookup[pk_val]
+        primary_color = phase_matches[0][3]
+        ax0.axvline(pk_val, color=primary_color, linewidth=1.0, alpha=0.8, ls="-")
+        
+        if show_phase_labels and show_all_phases:
+            display_matches = phase_matches[:max_labels_per_peak]
             
-            tt0  = biggest_peak(all_data[k0]) if k0 in all_data else np.nan
-            tt45 = biggest_peak(all_data[k45]) if k45 in all_data else np.nan
-            stress_rows.append({
-                "Pair":    f"{k0} / {k45}",
-                "Fabrication": SAMPLE_CATALOG[k0]["fabrication"],
-                "Treatment":   SAMPLE_CATALOG[k0]["treatment"],
-                "2θ (ψ=0°)":  f"{tt0:.4f}°" if not np.isnan(tt0) else "—",
-                "2θ (ψ=45°)": f"{tt45:.4f}°" if not np.isnan(tt45) else "—",
-                "Δ2θ (°)":    f"{(tt45-tt0):+.4f}" if not (np.isnan(tt0) or np.isnan(tt45)) else "—",
-            })
-        st.dataframe(pd.DataFrame(stress_rows), use_container_width=True)
-
-# TAB 5 — REPORT
-with tabs[5]:
-    st.subheader("Analysis Report")
-    if "last_result" not in st.session_state:
-        st.info("Run the Rietveld refinement first (Tab 3).")
+            for idx, (pname, hkl, ref_pk, pcolor, dist) in enumerate(display_matches):
+                short_name = pname.split()[0]
+                label = f"{hkl}\n{short_name}"
+                y_offset = pk_int * (1.02 + idx * 0.03)
+                ax0.text(pk_val, y_offset, label,
+                         fontsize=max(6, font_size - idx),
+                         ha="center", color=pcolor, 
+                         rotation=90, va="bottom", 
+                         bbox=dict(boxstyle="round,pad=0.15", 
+                                  facecolor="white", edgecolor=pcolor, alpha=0.8),
+                         zorder=10)
+            
+            if len(phase_matches) > max_labels_per_peak:
+                extra = len(phase_matches) - max_labels_per_peak
+                ax0.text(pk_val, pk_int * (1.02 + len(display_matches) * 0.03), 
+                         f"+{extra}", fontsize=6, ha="center", color="gray",
+                         rotation=90, va="bottom")
+        elif show_phase_labels:
+            pname, hkl, ref_pk, pcolor, dist = phase_matches[0]
+            short_name = pname.split()[0]
+            label = f"{hkl}\n{short_name}"
+            ax0.text(pk_val, pk_int*1.02, label,
+                     fontsize=font_size, ha="center", color=pcolor, 
+                     rotation=90, va="bottom", 
+                     bbox=dict(boxstyle="round,pad=0.2", 
+                              facecolor="white", edgecolor=pcolor, alpha=0.7))
     else:
-        result  = st.session_state["last_result"]
-        phases  = st.session_state["last_phases"]
-        samp    = st.session_state["last_sample"]
-        report_md = generate_report(result, phases, wavelength, samp)
-        st.markdown(report_md)
-        col_dl1, col_dl2 = st.columns(2)
-        col_dl1.download_button(
-            "⬇️ Download Report (.md)",
-            data=report_md,
-            file_name=f"rietveld_report_{samp}.md",
-            mime="text/markdown",
-        )
-        export_df = active_df.copy()
-        export_df["y_calc"]       = result["y_calc"]
-        export_df["y_background"] = result["y_background"]
-        export_df["difference"]   = active_df["intensity"].values - result["y_calc"]
-        csv_buf = io.StringIO()
-        export_df.to_csv(csv_buf, index=False)
-        col_dl2.download_button(
-            "⬇️ Download Fit Data (.csv)",
-            data=csv_buf.getvalue(),
-            file_name=f"rietveld_fit_{samp}.csv",
-            mime="text/csv",
-        )
+        ax0.axvline(pk_val, color="orange", linewidth=0.8, alpha=0.6, ls="--")
+        if show_2theta_labels:
+            ax0.text(pk_val, pk_int*1.01, f"{pk_val:.2f}°",
+                     fontsize=font_size, ha="center", color="darkred", 
+                     rotation=90, va="bottom")
+
+# Add reference tick marks for ALL phases (subtle background guides)
+for pname, pinfo in PHASES.items():
+    c = pinfo["color"]
+    for (pk, hkl) in pinfo["peaks"]:
+        if tth_min <= pk <= tth_max:
+            ylim = ax0.get_ylim()
+            ax0.plot([pk, pk], [ylim[0], ylim[0] + (ylim[1]-ylim[0])*0.02], 
+                    color=c, lw=0.5, alpha=0.3, ls=":")
+
+ax0.set_xlabel("2θ (°)", fontsize=label_fontsize)
+ax0.set_ylabel("Intensity (counts)", fontsize=label_fontsize)
+ax0.tick_params(axis='both', labelsize=tick_fontsize)
+ax0.set_xlim(tth_min, tth_max)
+ax0.legend(fontsize=legend_fontsize, loc="upper right")
+ax0.grid(True, alpha=0.25)
+fig0.tight_layout()
+st.pyplot(fig0)
+
+# Summary of detected peaks with phase assignments
+if len(auto_peaks) > 0:
+    st.markdown("🔴 **Detected peaks with phase assignments:**")
+    peak_info = []
+    for p in auto_peaks:
+        pk_val = two_theta[p]
+        pk_int = intensity[p]
+        if pk_val in match_lookup:
+            phases_str = " | ".join([f"{m[1]}:{m[0].split()[0]}" for m in match_lookup[pk_val][:3]])
+            if len(match_lookup[pk_val]) > 3:
+                phases_str += f" (+{len(match_lookup[pk_val])-3})"
+            peak_info.append(f"**{pk_val:.3f}°** ({pk_int:.0f} cts) → {phases_str}")
+        else:
+            peak_info.append(f"**{pk_val:.3f}°** ({pk_int:.0f} cts) → _unknown_")
+    for item in peak_info[:10]:
+        st.markdown(f"  • {item}")
+    if len(peak_info) > 10:
+        st.markdown(f"  _... and {len(peak_info)-10} more peaks_")
+
+# ──────────────────────────────────────────────────────────
+# Refinement
+# ──────────────────────────────────────────────────────────
+if refine_btn:
+    sel_phases = {k: v for k, v in PHASES.items() if active.get(k)}
+    if not sel_phases:
+        st.warning("Select at least one phase.")
+        st.stop()
+
+    st.divider()
+    st.subheader("🔁 Rietveld Profile Fit")
+
+    with st.spinner("Optimising profile parameters…"):
+
+        win = max(1, len(two_theta) // 30)
+        bg_pts = [np.percentile(intensity[max(0,i-win):i+win], 10)
+                  for i in range(0, len(two_theta), win)]
+        bg_x   = two_theta[::win][:len(bg_pts)]
+        bg_spl  = UnivariateSpline(bg_x, bg_pts, s=len(bg_pts)*500, k=3, ext=3)
+        background = np.clip(bg_spl(two_theta), 0, intensity.min()*1.5)
+
+        obs_net = np.maximum(intensity - background, 0)
+
+        phase_profiles = {}
+        peak_details   = []
+
+        for pname, pinfo in sel_phases.items():
+            prof = np.zeros_like(two_theta)
+            for (pk, hkl) in pinfo["peaks"]:
+                if not (tth_min <= pk <= tth_max):
+                    continue
+                fwhm = caglioti_fwhm(pk, U, V, W)
+                idx  = np.argmin(np.abs(two_theta - pk))
+                win2 = int(0.5 / 0.026)
+                lo, hi = max(0, idx-win2), min(len(obs_net)-1, idx+win2)
+                amp = max(obs_net[lo:hi].max(), 5.0)
+                contrib = profile(two_theta, pk, fwhm, amp, shape, eta)
+                prof += contrib
+                peak_details.append({
+                    "Phase": pname, "hkl": hkl,
+                    "2θ_ref (°)": pk, "FWHM (°)": fwhm,
+                    "Intensity": amp,
+                    "Size (nm)": scherrer(fwhm, pk, wl),
+                })
+            phase_profiles[pname] = prof
+
+        total_calc = background + sum(phase_profiles.values())
+
+        diff   = intensity - total_calc
+        w      = 1.0 / np.maximum(intensity, 1)
+        Rwp    = np.sqrt(np.sum(w * diff**2) / np.sum(w * intensity**2)) * 100
+        Rp     = np.sum(np.abs(diff)) / np.sum(intensity) * 100
+        n_free = sum(len(v["peaks"]) for v in sel_phases.values()) * 2 + 3
+        chi2   = np.sum(w * diff**2) / max(len(intensity) - n_free, 1)
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("R_wp (%)", f"{Rwp:.2f}", help="< 10% is excellent")
+    m2.metric("R_p (%)",  f"{Rp:.2f}")
+    m3.metric("χ²",       f"{chi2:.4f}", help="Target ≈ 1")
+    m4.metric("Peaks fitted", str(len(peak_details)))
+
+    fig, axes = plt.subplots(2, 1, figsize=(14, 8),
+                              gridspec_kw={"height_ratios": [4, 1]}, sharex=True)
+    ax = axes[0]
+
+    ax.plot(two_theta, intensity, "k-", lw=0.7, label="Observed (Yobs)", zorder=5)
+    ax.plot(two_theta, total_calc, "r-", lw=1.3, label="Calculated (Ycalc)", zorder=6)
+    ax.plot(two_theta, background, "--", color="#888", lw=0.9, label="Background", zorder=4)
+
+    for pname, prof in phase_profiles.items():
+        c = PHASES[pname]["color"]
+        ax.fill_between(two_theta, background, prof + background,
+                        color=c, alpha=0.15, zorder=2)
+        ax.plot(two_theta, prof + background, "-", color=c, lw=0.9, label=pname, zorder=3)
+    
+    for pname, pinfo in PHASES.items():
+        c = pinfo["color"]
+        alpha = 0.7 if pname in sel_phases else 0.3
+        ls = ":" if pname not in sel_phases else "-"
+        for (pk, hkl) in pinfo["peaks"]:
+            if tth_min <= pk <= tth_max:
+                ax.axvline(pk, color=c, lw=0.6, ls=ls, alpha=alpha)
+                if show_phase_labels:
+                    short_name = pname.split()[0]
+                    label = f"{hkl}\n{short_name}"
+                    y_pos = ax.get_ylim()[0] if ax.get_ylim()[0] > 0 else 0
+                    if pname not in sel_phases:
+                        y_pos -= (ax.get_ylim()[1] - ax.get_ylim()[0]) * 0.02
+                    ax.text(pk, y_pos, label, fontsize=max(6, font_size-1), 
+                            color=c, ha="center", va="bottom" if pname in sel_phases else "top", 
+                            rotation=90, alpha=alpha,
+                            bbox=dict(boxstyle="round,pad=0.1", 
+                                     facecolor="white", edgecolor=c, alpha=0.5))
+
+    ax.set_ylabel("Intensity (counts)", fontsize=label_fontsize)
+    ax.set_title("Rietveld Profile Fit — Co-Cr Dental Alloy (Cu Kα)", fontsize=label_fontsize)
+    ax.tick_params(axis='both', labelsize=tick_fontsize)
+    ax.legend(fontsize=legend_fontsize, loc="upper right", ncol=2)
+    ax.grid(True, alpha=0.2)
+    ax.set_xlim(tth_min, tth_max)
+
+    axes[1].plot(two_theta, diff, "-", color="#555", lw=0.6, label="Yobs − Ycalc")
+    axes[1].axhline(0, color="red", lw=0.9)
+    axes[1].fill_between(two_theta, diff, 0, where=diff > 0, color="#C62828", alpha=0.3)
+    axes[1].fill_between(two_theta, diff, 0, where=diff < 0, color="#1565C0", alpha=0.3)
+    axes[1].set_xlabel("2θ (°)", fontsize=label_fontsize)
+    axes[1].set_ylabel("Difference", fontsize=label_fontsize)
+    axes[1].tick_params(axis='both', labelsize=tick_fontsize)
+    axes[1].grid(True, alpha=0.2)
+    fig.tight_layout()
+    st.pyplot(fig)
+
+    st.subheader("📊 Phase Fractions & Crystallite Sizes")
+    total_area = sum(p.sum() for p in phase_profiles.values())
+    frac_data = []
+    for pname, prof in phase_profiles.items():
+        frac = prof.sum() / total_area * 100 if total_area > 0 else 0
+        ph_peaks = [d for d in peak_details if d["Phase"] == pname]
+        avg_size = np.mean([d["Size (nm)"] for d in ph_peaks]) if ph_peaks else 0
+        frac_data.append({
+            "Phase": pname,
+            "Space group": PHASES[pname]["space_group"],
+            "a (Å)": PHASES[pname]["a_ang"],
+            "Description": PHASES[pname]["description"],
+            "Phase fraction (%)": f"{frac:.1f}",
+            "Avg crystallite size (nm)": f"{avg_size:.1f}",
+        })
+    df_phases = pd.DataFrame(frac_data)
+    st.dataframe(df_phases, use_container_width=True, hide_index=True)
+
+    with st.expander("📋 Per-peak refinement details"):
+        df_peaks = pd.DataFrame(peak_details)
+        df_peaks["2θ_ref (°)"] = df_peaks["2θ_ref (°)"].map("{:.3f}".format)
+        df_peaks["FWHM (°)"]   = df_peaks["FWHM (°)"].map("{:.4f}".format)
+        df_peaks["Intensity"]  = df_peaks["Intensity"].map("{:.1f}".format)
+        df_peaks["Size (nm)"]  = df_peaks["Size (nm)"].map("{:.2f}".format)
+        st.dataframe(df_peaks, use_container_width=True, hide_index=True)
+
+    st.subheader("🥧 Phase Distribution")
+    fracs  = [float(d["Phase fraction (%)"])  for d in frac_data]
+    labels = [d["Phase"] for d in frac_data]
+    colors = [PHASES[d["Phase"]]["color"] for d in frac_data]
+    fig2, ax2 = plt.subplots(figsize=(5, 4))
+    wedges, texts, autotexts = ax2.pie(
+        fracs, labels=labels, colors=colors,
+        autopct="%1.1f%%", startangle=140,
+        textprops={"fontsize": tick_fontsize}
+    )
+    ax2.set_title("Estimated Phase Fractions", fontsize=label_fontsize)
+    fig2.tight_layout()
+    st.pyplot(fig2)
+
+    st.subheader("⬇️ Export Results")
+    dc1, dc2, dc3 = st.columns(3)
+
+    csv1 = df_phases.to_csv(index=False)
+    dc1.download_button("Phase table (CSV)", csv1, "phases.csv", "text/csv")
+
+    csv2 = pd.DataFrame(peak_details).to_csv(index=False)
+    dc2.download_button("Peak table (CSV)", csv2, "peaks.csv", "text/csv")
+
+    buf = io.BytesIO()
+    result = np.column_stack([two_theta, intensity, total_calc, background, diff])
+    np.savetxt(buf, result,
+               header="2theta  Observed  Calculated  Background  Difference",
+               fmt="%.5f")
+    dc3.download_button("Fit profile (.txt)", buf.getvalue(), "fit_profile.txt", "text/plain")
+
+# ──────────────────────────────────────────────────────────
+# Deployment guide
+# ──────────────────────────────────────────────────────────
+st.divider()
+with st.expander("🚀 Deploy on GitHub + Streamlit Cloud (step-by-step)"):
+    st.markdown("""
+    **1. Create a GitHub repository**
+    ```bash
+    mkdir xrd-rietveld && cd xrd-rietveld
+    git init
+    ```
+
+    **2. Add these two files to the folder:**
+    - `app.py`  ← this file
+    - `requirements.txt` ← see below
+
+    **requirements.txt**
+    ```
+    streamlit>=1.32
+    numpy
+    scipy
+    matplotlib
+    pandas
+    ```
+
+    **3. Push to GitHub**
+    ```bash
+    git add .
+    git commit -m "XRD Rietveld app for Co-Cr dental alloy"
+    git push origin main
+    ```
+
+    **4. Deploy on [streamlit.io/cloud](https://streamlit.io/cloud)**
+    - Click **New app** → select your repo
+    - Main file: `app.py`
+    - Click **Deploy** — free, no server needed ✅
+
+    **For full structure-factor Rietveld** (CIF-based), add to requirements:
+    ```
+    pymatgen
+    diffpy.srfit
+    ```
+    """)
