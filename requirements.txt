@@ -10,3 +10,4 @@ pandas
 plotly
 requests
 matplotlib
+GSAS-II  (pip install GSAS-II)
