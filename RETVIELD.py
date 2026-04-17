@@ -420,7 +420,7 @@ all_data = load_all_demo()
 if uploaded:
     active_df_raw = parse_asc(uploaded.read())
     st.info(f"📌 Showing **{uploaded.name}** (custom upload)")
-elif selected_key in all_
+elif selected_key in all_data:
     active_df_raw = all_data[selected_key]
     st.info(f"📌 Sample **{selected_key}** — {meta['label']}")
 else:
@@ -750,7 +750,7 @@ with tabs[4]:
                 for ki, k in enumerate([k0, k45]):
                     if k not in comp_samples:
                         continue
-                    if k in all_
+                    if k in all_data:
                         df_s = all_data[k]
                     else:
                         two_theta = np.linspace(30, 130, 2000)
